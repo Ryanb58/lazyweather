@@ -1,0 +1,14 @@
+{
+  "name": "Lazy Weather",
+  "short_name": "Lazy",
+  "description": "A lazy forecast — today vs. yesterday and tomorrow vs. today, in plain words.",
+  "start_url": ".",
+  "scope": ".",
+  "display": "standalone",
+  "orientation": "portrait",
+  "background_color": "#000000",
+  "theme_color": "#000000",
+  "icons": [
+    { "src": "favicon.svg", "sizes": "any", "type": "image/svg+xml", "purpose": "any" }
+  ]
+}

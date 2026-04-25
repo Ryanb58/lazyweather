@@ -68,9 +68,20 @@ function getPosition() {
     navigator.geolocation.getCurrentPosition(
       (pos) => resolve({ lat: pos.coords.latitude, lon: pos.coords.longitude }),
       (err) => reject(err),
-      { enableHighAccuracy: false, timeout: 8000, maximumAge: 5 * 60 * 1000 }
+      { enableHighAccuracy: false, timeout: 15000, maximumAge: 5 * 60 * 1000 }
     );
   });
+}
+
+async function searchPlaces(query) {
+  const q = query.trim();
+  if (q.length < 2) return [];
+  const r = await fetch(
+    `https://geocoding-api.open-meteo.com/v1/search?name=${encodeURIComponent(q)}&count=5&language=en&format=json`
+  );
+  if (!r.ok) throw new Error(`geocode ${r.status}`);
+  const j = await r.json();
+  return j.results || [];
 }
 
 async function reverseGeocode(lat, lon) {
@@ -104,26 +115,31 @@ async function fetchWeather(lat, lon) {
   // With past_days=1 + forecast_days=2 → daily.time = [yesterday, today, tomorrow]
   const yesterdayStr = j.daily.time[0];
   const todayStr = j.daily.time[1];
+  const tomorrowStr = j.daily.time[2];
 
   const findHourIdx = (dateStr, hour) => {
     const target = `${dateStr}T${String(hour).padStart(2, "0")}:00`;
     return j.hourly.time.findIndex((t) => t === target);
   };
 
-  const slotsToday = SLOTS.map((s) => {
-    const i = findHourIdx(todayStr, s.hour);
-    const iy = findHourIdx(yesterdayStr, s.hour);
-    return {
-      ...s,
-      tempC: i >= 0 ? j.hourly.temperature_2m[i] : null,
-      code: i >= 0 ? j.hourly.weathercode[i] : 0,
-      deltaC:
-        i >= 0 && iy >= 0
-          ? j.hourly.temperature_2m[i] - j.hourly.temperature_2m[iy]
-          : null,
-      isNight: s.hour >= 20 || s.hour < 6,
-    };
-  });
+  const buildSlots = (dateStr, refDateStr) =>
+    SLOTS.map((s) => {
+      const i = findHourIdx(dateStr, s.hour);
+      const ir = findHourIdx(refDateStr, s.hour);
+      return {
+        ...s,
+        tempC: i >= 0 ? j.hourly.temperature_2m[i] : null,
+        code: i >= 0 ? j.hourly.weathercode[i] : 0,
+        deltaC:
+          i >= 0 && ir >= 0
+            ? j.hourly.temperature_2m[i] - j.hourly.temperature_2m[ir]
+            : null,
+        isNight: s.hour >= 20 || s.hour < 6,
+      };
+    });
+
+  const slotsToday = buildSlots(todayStr, yesterdayStr);
+  const slotsTomorrow = tomorrowStr ? buildSlots(tomorrowStr, todayStr) : [];
 
   const avg = (a, b) => (a + b) / 2;
   const yAvg = avg(j.daily.temperature_2m_max[0], j.daily.temperature_2m_min[0]);
@@ -136,6 +152,7 @@ async function fetchWeather(lat, lon) {
 
   return {
     slotsToday,
+    slotsTomorrow,
     todayVsYesterdayC: tAvg - yAvg,
     tomorrowVsTodayC: tmAvg - tAvg,
     tomorrowCode,
@@ -154,7 +171,22 @@ export default function LazyWeather() {
   const [unit, setUnit] = useState("C");
   const [menuOpen, setMenuOpen] = useState(false);
   const [page, setPage] = useState(0);
+  const [searchOpen, setSearchOpen] = useState(false);
+  const [searchQuery, setSearchQuery] = useState("");
+  const [searchResults, setSearchResults] = useState([]);
+  const [searching, setSearching] = useState(false);
+  const [installEvent, setInstallEvent] = useState(null);
+  const [isStandalone, setIsStandalone] = useState(false);
+  const [platform, setPlatform] = useState("desktop");
+  const [bannerDismissed, setBannerDismissed] = useState(() => {
+    try {
+      return typeof localStorage !== "undefined" && localStorage.getItem("lw-install-dismissed") === "1";
+    } catch {
+      return false;
+    }
+  });
   const scrollerRef = useRef(null);
+  const searchInputRef = useRef(null);
 
   const resolveLocation = useCallback(async (forceGeo = false) => {
     setStatus("locating");
@@ -200,6 +232,92 @@ export default function LazyWeather() {
       cancelled = true;
     };
   }, [coords]);
+
+  useEffect(() => {
+    if (!searchOpen) return;
+    const q = searchQuery.trim();
+    if (q.length < 2) { setSearchResults([]); setSearching(false); return; }
+    let cancelled = false;
+    setSearching(true);
+    const t = setTimeout(() => {
+      searchPlaces(q)
+        .then((rs) => { if (!cancelled) setSearchResults(rs); })
+        .catch(() => { if (!cancelled) setSearchResults([]); })
+        .finally(() => { if (!cancelled) setSearching(false); });
+    }, 250);
+    return () => {
+      cancelled = true;
+      clearTimeout(t);
+    };
+  }, [searchQuery, searchOpen]);
+
+  useEffect(() => {
+    if (searchOpen && searchInputRef.current) searchInputRef.current.focus();
+  }, [searchOpen]);
+
+  useEffect(() => {
+    const ua = (typeof navigator !== "undefined" && navigator.userAgent) || "";
+    const ios = /iPhone|iPad|iPod/i.test(ua);
+    const android = /Android/i.test(ua);
+    setPlatform(ios ? "ios" : android ? "android" : "desktop");
+    const standalone =
+      (typeof window !== "undefined" &&
+        ((window.matchMedia && window.matchMedia("(display-mode: standalone)").matches) ||
+          window.navigator.standalone === true)) ||
+      false;
+    setIsStandalone(standalone);
+    const onBeforeInstall = (e) => {
+      e.preventDefault();
+      setInstallEvent(e);
+    };
+    const onInstalled = () => {
+      setInstallEvent(null);
+      setIsStandalone(true);
+    };
+    window.addEventListener("beforeinstallprompt", onBeforeInstall);
+    window.addEventListener("appinstalled", onInstalled);
+    return () => {
+      window.removeEventListener("beforeinstallprompt", onBeforeInstall);
+      window.removeEventListener("appinstalled", onInstalled);
+    };
+  }, []);
+
+  const dismissBanner = () => {
+    setBannerDismissed(true);
+    try { localStorage.setItem("lw-install-dismissed", "1"); } catch {}
+  };
+
+  const triggerInstall = async () => {
+    if (installEvent) {
+      installEvent.prompt();
+      const { outcome } = await installEvent.userChoice;
+      if (outcome === "accepted") dismissBanner();
+      setInstallEvent(null);
+      return;
+    }
+    if (platform === "ios") {
+      alert("To install: tap the Share button, then 'Add to Home Screen'.");
+    } else {
+      alert("Open the browser menu, then 'Install app' or 'Add to Home Screen'.");
+    }
+  };
+
+  const showInstallBanner =
+    !isStandalone &&
+    !bannerDismissed &&
+    (platform === "ios" || platform === "android" || installEvent != null);
+
+  const pickPlace = (p) => {
+    setSearchOpen(false);
+    setSearchQuery("");
+    setSearchResults([]);
+    setMenuOpen(false);
+    setUsingFallback(false);
+    setErr(null);
+    setData(null);
+    setCity(p.name);
+    setCoords({ lat: p.latitude, lon: p.longitude });
+  };
 
   const onScroll = () => {
     const el = scrollerRef.current;
@@ -248,7 +366,64 @@ export default function LazyWeather() {
         {/* Top bar */}
         <div className="flex items-start justify-between px-5 pt-5 pb-2 z-10 gap-3">
           <div className="flex flex-col gap-1 min-w-0">
-            <div className="lw-pill truncate max-w-[60vw]">{locationLabel}</div>
+            <div className="relative">
+              <button
+                className="lw-pill truncate max-w-[60vw] hover:bg-[#222] transition cursor-pointer text-left"
+                onClick={() => { setMenuOpen(false); setSearchOpen((v) => !v); }}
+                aria-label="Change location"
+              >
+                {locationLabel}
+              </button>
+              {searchOpen && (
+                <div className="absolute left-0 mt-2 rounded-2xl bg-[#1a1a1a] p-2 w-72 max-w-[80vw] text-sm z-30 shadow-lg">
+                  <input
+                    ref={searchInputRef}
+                    value={searchQuery}
+                    onChange={(e) => setSearchQuery(e.target.value)}
+                    onKeyDown={(e) => {
+                      if (e.key === "Escape") { setSearchOpen(false); setSearchQuery(""); }
+                    }}
+                    placeholder="Search a city…"
+                    className="w-full bg-transparent outline-none px-3 py-2 text-[14px] placeholder:text-[#6b6b6b]"
+                  />
+                  <div className="h-px bg-white/10 my-1" />
+                  {searching && (
+                    <div className="px-3 py-2 lw-muted text-[12px]">searching…</div>
+                  )}
+                  {!searching && searchResults.map((p) => (
+                    <button
+                      key={`${p.id}-${p.latitude}-${p.longitude}`}
+                      className="w-full text-left px-3 py-2 rounded-xl hover:bg-[#262626]"
+                      onClick={() => pickPlace(p)}
+                    >
+                      <div className="text-[14px]">{p.name}</div>
+                      <div className="lw-muted text-[11px]">
+                        {[p.admin1, p.country].filter(Boolean).join(", ")}
+                      </div>
+                    </button>
+                  ))}
+                  {!searching && searchQuery.trim().length >= 2 && searchResults.length === 0 && (
+                    <div className="px-3 py-2 lw-muted text-[12px]">no matches</div>
+                  )}
+                  {searchQuery.trim().length < 2 && !searching && (
+                    <div className="px-3 py-2 lw-muted text-[11px]">Type at least 2 characters.</div>
+                  )}
+                  <div className="h-px bg-white/10 my-1" />
+                  <button
+                    className="w-full text-left px-3 py-2 rounded-xl hover:bg-[#262626] flex items-center gap-2"
+                    onClick={() => {
+                      setSearchOpen(false);
+                      setSearchQuery("");
+                      setSearchResults([]);
+                      resolveLocation(true);
+                    }}
+                  >
+                    <span className="lw-muted w-4 text-center">⌖</span>
+                    <span className="text-[14px]">Use my location</span>
+                  </button>
+                </div>
+              )}
+            </div>
             {usingFallback && (
               <div className="text-[11px] lw-muted pl-2">
                 using fallback · tap … to retry
@@ -258,7 +433,7 @@ export default function LazyWeather() {
           <div className="relative">
             <button
               className="lw-iconbtn"
-              onClick={() => setMenuOpen((v) => !v)}
+              onClick={() => { setSearchOpen(false); setMenuOpen((v) => !v); }}
               aria-label="menu"
             >
               <span className="text-xl leading-none -mt-2">…</span>
@@ -298,6 +473,22 @@ export default function LazyWeather() {
             )}
           </div>
         </div>
+
+        {showInstallBanner && (
+          <div className="px-5 py-2 flex items-center justify-between gap-3 text-[12px] border-y border-white/5">
+            <button onClick={triggerInstall} className="lw-muted text-left truncate">
+              <span className="text-white/90 underline underline-offset-2">Add to home screen</span>
+              <span> for the cleanest view</span>
+            </button>
+            <button
+              onClick={dismissBanner}
+              aria-label="Dismiss"
+              className="lw-muted shrink-0 w-6 text-base leading-none"
+            >
+              ×
+            </button>
+          </div>
+        )}
 
         {/* Pager */}
         <div
@@ -371,6 +562,35 @@ export default function LazyWeather() {
                   {status === "locating" ? "Locating…" : status === "loading" ? "Loading…" : ""}
                 </div>
               )}
+            </div>
+            <div className="pb-10">
+              {data?.slotsTomorrow?.map((s) => (
+                <div
+                  key={s.label}
+                  className="grid items-center py-1.5"
+                  style={{ gridTemplateColumns: "1fr auto auto auto auto" }}
+                >
+                  <div className="text-[20px]">{s.label}</div>
+                  <div className="text-[20px] tabular-nums pl-6 pr-3 text-right min-w-[5ch]">
+                    {fmtTemp(s.tempC, unit)}
+                  </div>
+                  <div className="text-[20px] lw-muted w-6 text-center">
+                    {codeGlyph(s.code, s.isNight)}
+                  </div>
+                  <div className="text-[20px] lw-muted tabular-nums pl-6 pr-2 text-right min-w-[5ch]">
+                    {fmtDelta(s.deltaC, unit)}
+                  </div>
+                  <div className="text-[20px] lw-muted w-5 text-center">
+                    {s.deltaC == null
+                      ? ""
+                      : Math.round(s.deltaC) === 0
+                      ? "·"
+                      : s.deltaC > 0
+                      ? "↑"
+                      : "↓"}
+                  </div>
+                </div>
+              ))}
             </div>
           </section>
         </div>

@@ -26,10 +26,14 @@ The aesthetic is deliberately spare — lots of empty vertical space, monospace,
 ### Page 2 — Tomorrow
 - Headline compares **tomorrow's daily-average temp** to **today's**. If tomorrow's weather code matches a known dramatic condition (fog, snow, rain, thunder), a "flavor" phrase overrides the temperature comparison: "HIDDEN BY FOG", "BURIED IN SNOW", "DROWNED IN RAIN", "RIPPED BY THUNDER", "MISTED OVER".
 - The flavor headline is rendered with a small SVG dot-grid glyph between each word, mimicking the original's textured spacers.
+- Same four time-of-day rows (Morning / Noon / Evening / Night) showing tomorrow's hourly temp at that hour, a glyph, and the delta vs. today's same hour.
 
 ### Menu
 - **Units:** Celsius / Fahrenheit. Stored in component state, no persistence yet.
 - **Use my location:** retries `navigator.geolocation.getCurrentPosition()`. On failure, falls back to Bellevue (47.6101, -122.2015) with a small "fallback · {reason}" hint under the location pill.
+
+### Location pill (search)
+The `*City*` pill is also a button. Tapping it opens a small search popover that hits Open-Meteo's geocoding endpoint (`https://geocoding-api.open-meteo.com/v1/search?name=...&count=5`). Picking a result sets `coords` + `city` directly (no reverse geocode needed — the geocoding payload includes the canonical name) and the weather effect refetches. Search debounces at 250ms and requires ≥2 characters.
 
 ## APIs
 
@@ -89,10 +93,10 @@ Grammar fix: "ABOUT THE SAME than today" reads wrong, so for the tomorrow page w
 
 1. **Geolocation falling back to Bellevue.** When opened from `file://`, browsers block geolocation. When opened from a non-localhost `http://`, browsers also block it. Fix is to serve over `localhost` or `https://`. The fallback hint surfaces the real reason (`permission denied`, `file:// — needs http(s)`, `needs https`, `timeout`).
 2. **Unit toggle doesn't persist.** Add `localStorage` once you move to a real Vite build. (Note: `localStorage` is not available in Anthropic-hosted artifacts but is fine in any normal deployment.)
-3. **Manual city search.** Currently you only get geolocation or the Bellevue fallback. A search input that hits Open-Meteo's geocoding endpoint (`https://geocoding-api.open-meteo.com/v1/search?name=...`) would close the gap.
-4. **Phrasing thresholds are Celsius-only.** Whichever unit the user picks, the comparison still bins on Celsius deltas. Probably fine — the *feel* of "warmer" is similar across units — but worth knowing.
-5. **No caching.** Every reload hits both APIs. Open-Meteo is generous but for a deployed app cache the response for ~30 minutes.
-6. **The two-page swipe** uses native CSS `scroll-snap-type: x mandatory`. Works on mobile and desktop trackpads. No swipe library needed.
+3. **Phrasing thresholds are Celsius-only.** Whichever unit the user picks, the comparison still bins on Celsius deltas. Probably fine — the *feel* of "warmer" is similar across units — but worth knowing.
+4. **No caching.** Every reload hits both APIs. Open-Meteo is generous but for a deployed app cache the response for ~30 minutes.
+5. **The two-page swipe** uses native CSS `scroll-snap-type: x mandatory`. Works on mobile and desktop trackpads. No swipe library needed.
+6. **Picked-city is not persisted.** Refreshing reverts to geolocation/Bellevue. `localStorage` would fix it.
 
 ## What was deliberately left out
 
