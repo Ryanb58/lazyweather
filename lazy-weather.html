@@ -1,0 +1,305 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover" />
+  <title>Lazy Weather</title>
+  <script src="https://cdn.tailwindcss.com"></script>
+  <script crossorigin src="https://unpkg.com/react@18/umd/react.production.min.js"></script>
+  <script crossorigin src="https://unpkg.com/react-dom@18/umd/react-dom.production.min.js"></script>
+  <script src="https://unpkg.com/@babel/standalone/babel.min.js"></script>
+  <link href="https://fonts.googleapis.com/css2?family=JetBrains+Mono:wght@400;500&display=swap" rel="stylesheet">
+  <style>
+    html, body, #root { background: #000; min-height: 100%; }
+    body { margin: 0; }
+    .lw { font-family: 'JetBrains Mono', ui-monospace, SFMono-Regular, Menlo, monospace; }
+    .lw-muted { color: #6b6b6b; }
+    .lw-pill { background: #1a1a1a; border-radius: 999px; padding: 8px 16px; color: #cfcfcf; font-size: 15px; letter-spacing: 0.02em; }
+    .lw-iconbtn { width: 40px; height: 40px; border-radius: 999px; background: #1a1a1a; color: #cfcfcf; display: grid; place-items: center; }
+    .scroller { scroll-snap-type: x mandatory; -webkit-overflow-scrolling: touch; scrollbar-width: none; }
+    .scroller::-webkit-scrollbar { display: none; }
+    .page { scroll-snap-align: start; scroll-snap-stop: always; }
+  </style>
+</head>
+<body class="bg-black text-white">
+  <div id="root"></div>
+
+  <script type="text/babel" data-presets="react">
+    const { useCallback, useEffect, useRef, useState, Fragment } = React;
+
+    const FALLBACK = { lat: 47.6101, lon: -122.2015, city: "Bellevue" };
+    const SLOTS = [
+      { label: "Morning", hour: 8 },
+      { label: "Noon", hour: 12 },
+      { label: "Evening", hour: 18 },
+      { label: "Night", hour: 22 },
+    ];
+
+    function codeGlyph(code, isNight) {
+      if (code <= 2) return isNight ? "☾" : "☀";
+      if (code === 3) return "☁";
+      if (code === 45 || code === 48) return "≋";
+      if (code >= 51 && code <= 57) return "‧";
+      if (code >= 61 && code <= 67) return "☂";
+      if (code >= 71 && code <= 77) return "❄";
+      if (code >= 80 && code <= 82) return "☂";
+      if (code >= 85 && code <= 86) return "❄";
+      if (code >= 95) return "⚡";
+      return "·";
+    }
+
+    function comparePhrase(deltaC, mode) {
+      const abs = Math.abs(deltaC);
+      let emphasis;
+      if (abs < 1.5) emphasis = "ABOUT THE SAME";
+      else if (abs < 4) emphasis = deltaC > 0 ? "A LITTLE WARMER" : "A LITTLE COOLER";
+      else if (abs < 8) emphasis = deltaC > 0 ? "WARMER" : "COOLER";
+      else emphasis = deltaC > 0 ? "MUCH WARMER" : "MUCH COOLER";
+      const suffix = mode === "yesterday" ? "as yesterday" : "than today";
+      const fixedSuffix = emphasis === "ABOUT THE SAME" && mode === "today" ? "as today" : suffix;
+      const prefix = mode === "yesterday" ? "Today's weather is:" : "Tomorrow's weather will be";
+      return { prefix, emphasis, suffix: fixedSuffix };
+    }
+
+    function conditionFlavor(code) {
+      if (code === 45 || code === 48) return "HIDDEN BY FOG";
+      if (code >= 71 && code <= 77) return "BURIED IN SNOW";
+      if (code >= 85 && code <= 86) return "BURIED IN SNOW";
+      if (code >= 95) return "RIPPED BY THUNDER";
+      if (code >= 61 && code <= 67) return "DROWNED IN RAIN";
+      if (code >= 80 && code <= 82) return "DROWNED IN RAIN";
+      if (code >= 51 && code <= 57) return "MISTED OVER";
+      return null;
+    }
+
+    const cToF = (c) => (c * 9) / 5 + 32;
+    const fmtTemp = (c, unit) => {
+      if (c == null || Number.isNaN(c)) return "—";
+      const v = unit === "F" ? cToF(c) : c;
+      return `${Math.round(v)}°${unit}`;
+    };
+    const fmtDelta = (c, unit) => {
+      if (c == null || Number.isNaN(c)) return "—";
+      const v = unit === "F" ? (c * 9) / 5 : c;
+      return `${Math.abs(Math.round(v))}°${unit}`;
+    };
+
+    function getPosition() {
+      return new Promise((resolve, reject) => {
+        if (!("geolocation" in navigator)) return reject(new Error("no geolocation"));
+        navigator.geolocation.getCurrentPosition(
+          (pos) => resolve({ lat: pos.coords.latitude, lon: pos.coords.longitude }),
+          (err) => reject(err),
+          { enableHighAccuracy: false, timeout: 8000, maximumAge: 5 * 60 * 1000 }
+        );
+      });
+    }
+
+    async function reverseGeocode(lat, lon) {
+      const r = await fetch(`https://api.bigdatacloud.net/data/reverse-geocode-client?latitude=${lat}&longitude=${lon}&localityLanguage=en`);
+      if (!r.ok) throw new Error(`reverse geocode ${r.status}`);
+      const j = await r.json();
+      return j.locality || j.city || j.principalSubdivision || j.countryName || "Here";
+    }
+
+    async function fetchWeather(lat, lon) {
+      const url = `https://api.open-meteo.com/v1/forecast?latitude=${lat}&longitude=${lon}&hourly=temperature_2m,weathercode&daily=weathercode,temperature_2m_max,temperature_2m_min&past_days=1&forecast_days=2&timezone=auto`;
+      const r = await fetch(url);
+      if (!r.ok) throw new Error(`HTTP ${r.status}`);
+      const j = await r.json();
+      const yesterdayStr = j.daily.time[0];
+      const todayStr = j.daily.time[1];
+      const findHourIdx = (dateStr, hour) => j.hourly.time.findIndex((t) => t === `${dateStr}T${String(hour).padStart(2, "0")}:00`);
+      const slotsToday = SLOTS.map((s) => {
+        const i = findHourIdx(todayStr, s.hour);
+        const iy = findHourIdx(yesterdayStr, s.hour);
+        return {
+          ...s,
+          tempC: i >= 0 ? j.hourly.temperature_2m[i] : null,
+          code: i >= 0 ? j.hourly.weathercode[i] : 0,
+          deltaC: i >= 0 && iy >= 0 ? j.hourly.temperature_2m[i] - j.hourly.temperature_2m[iy] : null,
+          isNight: s.hour >= 20 || s.hour < 6,
+        };
+      });
+      const avg = (a, b) => (a + b) / 2;
+      const yAvg = avg(j.daily.temperature_2m_max[0], j.daily.temperature_2m_min[0]);
+      const tAvg = avg(j.daily.temperature_2m_max[1], j.daily.temperature_2m_min[1]);
+      const tmAvg = j.daily.temperature_2m_max[2] != null ? avg(j.daily.temperature_2m_max[2], j.daily.temperature_2m_min[2]) : tAvg;
+      const tomorrowCode = j.daily.weathercode[2] ?? j.daily.weathercode[1];
+      return { slotsToday, todayVsYesterdayC: tAvg - yAvg, tomorrowVsTodayC: tmAvg - tAvg, tomorrowCode };
+    }
+
+    function Dotgrid() {
+      return (
+        <svg width="18" height="18" viewBox="0 0 18 18" className="inline-block opacity-70">
+          {[0,1,2,3].map((r) => [0,1,2,3].map((c) => (
+            <circle key={`${r}-${c}`} cx={3 + c*4} cy={3 + r*4} r="0.9" fill="#6b6b6b" />
+          )))}
+        </svg>
+      );
+    }
+
+    function TodayHeadline({ deltaC }) {
+      const { prefix, emphasis, suffix } = comparePhrase(deltaC, "yesterday");
+      return (
+        <div className="text-[26px] leading-[1.35]">
+          <div>{prefix}</div>
+          <div className="lw-muted tracking-wide">{emphasis}</div>
+          <div>{suffix}</div>
+        </div>
+      );
+    }
+
+    function TomorrowHeadline({ deltaC, code }) {
+      const flavor = conditionFlavor(code);
+      const { prefix, emphasis, suffix } = comparePhrase(deltaC, "today");
+      const headline = flavor || emphasis;
+      const words = headline.split(" ");
+      return (
+        <div className="text-[26px] leading-[1.35]">
+          <div>{prefix}</div>
+          <div className="lw-muted tracking-wide flex items-center gap-2 flex-wrap">
+            <Dotgrid />
+            {words.map((w, i) => (
+              <Fragment key={i}>
+                <span>{w}</span>
+                <Dotgrid />
+              </Fragment>
+            ))}
+          </div>
+          <div>{flavor ? "than today" : suffix}</div>
+        </div>
+      );
+    }
+
+    function LazyWeather() {
+      const [coords, setCoords] = useState(null);
+      const [city, setCity] = useState(null);
+      const [data, setData] = useState(null);
+      const [status, setStatus] = useState("locating");
+      const [err, setErr] = useState(null);
+      const [geoErr, setGeoErr] = useState(null);
+      const [usingFallback, setUsingFallback] = useState(false);
+      const [unit, setUnit] = useState("C");
+      const [menuOpen, setMenuOpen] = useState(false);
+      const [page, setPage] = useState(0);
+      const scrollerRef = useRef(null);
+
+      const resolveLocation = useCallback(async (forceGeo = false) => {
+        setStatus("locating"); setErr(null); setData(null); setGeoErr(null);
+        try {
+          const { lat, lon } = await getPosition();
+          setCoords({ lat, lon }); setUsingFallback(false);
+          try { setCity(await reverseGeocode(lat, lon)); } catch { setCity("Here"); }
+        } catch (e) {
+          let reason = "unknown";
+          if (e && typeof e.code === "number") {
+            if (e.code === 1) reason = "permission denied";
+            else if (e.code === 2) reason = "position unavailable";
+            else if (e.code === 3) reason = "timeout";
+          } else if (e && e.message) {
+            reason = e.message;
+          }
+          if (location.protocol === "file:") reason = "file:// — needs http(s)";
+          else if (location.protocol === "http:" && location.hostname !== "localhost" && location.hostname !== "127.0.0.1") reason = "needs https";
+          console.warn("[lazy-weather] geolocation failed:", reason, e);
+          setGeoErr(reason);
+          if (forceGeo) setErr("Couldn't get your location: " + reason);
+          setCoords({ lat: FALLBACK.lat, lon: FALLBACK.lon });
+          setCity(FALLBACK.city); setUsingFallback(true);
+        }
+      }, []);
+
+      useEffect(() => { resolveLocation(false); }, [resolveLocation]);
+
+      useEffect(() => {
+        if (!coords) return;
+        let cancelled = false;
+        setStatus("loading");
+        fetchWeather(coords.lat, coords.lon)
+          .then((d) => { if (!cancelled) { setData(d); setStatus("ready"); } })
+          .catch((e) => { if (!cancelled) { setErr(String(e.message || e)); setStatus("error"); } });
+        return () => { cancelled = true; };
+      }, [coords]);
+
+      const onScroll = () => {
+        const el = scrollerRef.current; if (!el) return;
+        const idx = Math.round(el.scrollLeft / el.clientWidth);
+        if (idx !== page) setPage(idx);
+      };
+
+      const locationLabel = status === "locating" && !city ? "*locating…*" : `*${city || "—"}*`;
+
+      return (
+        <div className="min-h-screen w-full bg-black text-white lw select-none">
+          <div className="max-w-md mx-auto min-h-screen flex flex-col relative">
+            <div className="flex items-start justify-between px-5 pt-5 pb-2 z-10 gap-3">
+              <div className="flex flex-col gap-1 min-w-0">
+                <div className="lw-pill truncate max-w-[60vw]">{locationLabel}</div>
+                {usingFallback && <div className="text-[11px] lw-muted pl-2">fallback{geoErr ? ` · ${geoErr}` : ""} · tap … to retry</div>}
+              </div>
+              <div className="relative">
+                <button className="lw-iconbtn" onClick={() => setMenuOpen((v) => !v)} aria-label="menu">
+                  <span className="text-xl leading-none -mt-2">…</span>
+                </button>
+                {menuOpen && (
+                  <div className="absolute right-0 mt-2 rounded-2xl bg-[#1a1a1a] p-2 w-52 text-sm z-20" onMouseLeave={() => setMenuOpen(false)}>
+                    <div className="px-3 pt-1 pb-1 lw-muted text-[11px] uppercase tracking-wider">Units</div>
+                    <button className={`w-full text-left px-3 py-2 rounded-xl ${unit === "C" ? "bg-[#262626]" : ""}`} onClick={() => { setUnit("C"); setMenuOpen(false); }}>Celsius</button>
+                    <button className={`w-full text-left px-3 py-2 rounded-xl ${unit === "F" ? "bg-[#262626]" : ""}`} onClick={() => { setUnit("F"); setMenuOpen(false); }}>Fahrenheit</button>
+                    <div className="h-px bg-white/10 my-1" />
+                    <button className="w-full text-left px-3 py-2 rounded-xl" onClick={() => { setMenuOpen(false); resolveLocation(true); }}>Use my location</button>
+                  </div>
+                )}
+              </div>
+            </div>
+
+            <div ref={scrollerRef} onScroll={onScroll} className="scroller flex-1 overflow-x-auto overflow-y-hidden flex">
+              <section className="page min-w-full px-5 flex flex-col">
+                <div className="flex-1 flex items-center">
+                  {status === "ready" && data ? <TodayHeadline deltaC={data.todayVsYesterdayC} /> :
+                   status === "error" ? (
+                    <div className="text-[18px] leading-relaxed">
+                      <div>Couldn't load weather.</div>
+                      <div className="lw-muted mt-2 text-[13px] break-words">{err}</div>
+                      <button className="mt-4 border border-white/80 rounded-md px-4 py-2 text-[14px] hover:bg-white hover:text-black transition" onClick={() => setCoords((c) => c ? { ...c } : c)}>Retry</button>
+                    </div>
+                  ) : <div className="lw-muted text-sm">{status === "locating" ? "Locating…" : "Loading…"}</div>}
+                </div>
+                <div className="pb-10">
+                  {data?.slotsToday?.map((s) => (
+                    <div key={s.label} className="grid items-center py-1.5" style={{ gridTemplateColumns: "1fr auto auto auto auto" }}>
+                      <div className="text-[20px]">{s.label}</div>
+                      <div className="text-[20px] tabular-nums pl-6 pr-3 text-right min-w-[5ch]">{fmtTemp(s.tempC, unit)}</div>
+                      <div className="text-[20px] lw-muted w-6 text-center">{codeGlyph(s.code, s.isNight)}</div>
+                      <div className="text-[20px] lw-muted tabular-nums pl-6 pr-2 text-right min-w-[5ch]">{fmtDelta(s.deltaC, unit)}</div>
+                      <div className="text-[20px] lw-muted w-5 text-center">{s.deltaC == null ? "" : Math.round(s.deltaC) === 0 ? "·" : s.deltaC > 0 ? "↑" : "↓"}</div>
+                    </div>
+                  ))}
+                </div>
+              </section>
+
+              <section className="page min-w-full px-5 flex flex-col">
+                <div className="flex-1 flex items-center">
+                  {status === "ready" && data ? <TomorrowHeadline deltaC={data.tomorrowVsTodayC} code={data.tomorrowCode} /> :
+                    <div className="lw-muted text-sm">{status === "locating" ? "Locating…" : status === "loading" ? "Loading…" : ""}</div>}
+                </div>
+              </section>
+            </div>
+
+            <div className="flex justify-center gap-2 pb-6 pt-2">
+              {[0,1].map((i) => (
+                <button key={i} aria-label={`page ${i+1}`}
+                  onClick={() => { const el = scrollerRef.current; if (el) el.scrollTo({ left: i * el.clientWidth, behavior: "smooth" }); }}
+                  className="w-1.5 h-1.5 rounded-full" style={{ background: page === i ? "#e5e5e5" : "#3a3a3a" }} />
+              ))}
+            </div>
+          </div>
+        </div>
+      );
+    }
+
+    ReactDOM.createRoot(document.getElementById("root")).render(<LazyWeather />);
+  </script>
+</body>
+</html>
