@@ -335,12 +335,14 @@ export default function LazyWeather() {
     status === "locating" && !city ? "*locating…*" : `*${city || "—"}*`;
 
   return (
-    <div className="min-h-screen min-h-[100dvh] w-full bg-black text-white font-mono select-none">
+    <div className="h-full w-full bg-black text-white font-mono select-none overflow-hidden">
       <link
         href="https://fonts.googleapis.com/css2?family=JetBrains+Mono:wght@400;500&display=swap"
         rel="stylesheet"
       />
       <style>{`
+        html, body, #root { height: 100dvh; }
+        body { overflow: hidden; overscroll-behavior-y: none; }
         .lw { font-family: 'JetBrains Mono', ui-monospace, SFMono-Regular, Menlo, monospace; }
         .lw-muted { color: #6b6b6b; }
         .lw-pill {
@@ -367,7 +369,7 @@ export default function LazyWeather() {
         .page { scroll-snap-align: start; scroll-snap-stop: always; }
       `}</style>
 
-      <div className="lw max-w-md mx-auto min-h-screen min-h-[100dvh] flex flex-col relative">
+      <div className="lw max-w-md mx-auto h-full flex flex-col relative">
         {/* Top bar */}
         <div
           className="flex items-start justify-between px-5 pb-2 z-10 gap-3"
@@ -509,7 +511,7 @@ export default function LazyWeather() {
         <div
           ref={scrollerRef}
           onScroll={onScroll}
-          className="scroller flex-1 overflow-x-auto overflow-y-hidden flex"
+          className="scroller flex-1 min-h-0 overflow-x-auto overflow-y-hidden flex"
         >
           {/* PAGE 1 — today */}
           <section className="page min-w-full px-5 flex flex-col">
