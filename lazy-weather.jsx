@@ -68,7 +68,7 @@ function getPosition() {
     navigator.geolocation.getCurrentPosition(
       (pos) => resolve({ lat: pos.coords.latitude, lon: pos.coords.longitude }),
       (err) => reject(err),
-      { enableHighAccuracy: false, timeout: 15000, maximumAge: 5 * 60 * 1000 }
+      { enableHighAccuracy: false, timeout: 8000, maximumAge: 5 * 60 * 1000 }
     );
   });
 }
@@ -282,6 +282,11 @@ export default function LazyWeather() {
     };
   }, []);
 
+  const refreshWeather = () => {
+    if (!coords) return;
+    setCoords((c) => (c ? { ...c } : c));
+  };
+
   const dismissBanner = () => {
     setBannerDismissed(true);
     try { localStorage.setItem("lw-install-dismissed", "1"); } catch {}
@@ -330,7 +335,7 @@ export default function LazyWeather() {
     status === "locating" && !city ? "*locating…*" : `*${city || "—"}*`;
 
   return (
-    <div className="min-h-screen w-full bg-black text-white font-mono select-none">
+    <div className="min-h-screen min-h-[100dvh] w-full bg-black text-white font-mono select-none">
       <link
         href="https://fonts.googleapis.com/css2?family=JetBrains+Mono:wght@400;500&display=swap"
         rel="stylesheet"
@@ -362,9 +367,12 @@ export default function LazyWeather() {
         .page { scroll-snap-align: start; scroll-snap-stop: always; }
       `}</style>
 
-      <div className="lw max-w-md mx-auto min-h-screen flex flex-col relative">
+      <div className="lw max-w-md mx-auto min-h-screen min-h-[100dvh] flex flex-col relative">
         {/* Top bar */}
-        <div className="flex items-start justify-between px-5 pt-5 pb-2 z-10 gap-3">
+        <div
+          className="flex items-start justify-between px-5 pb-2 z-10 gap-3"
+          style={{ paddingTop: "max(1.25rem, env(safe-area-inset-top))" }}
+        >
           <div className="flex flex-col gap-1 min-w-0">
             <div className="relative">
               <button
@@ -463,6 +471,13 @@ export default function LazyWeather() {
                   Fahrenheit
                 </button>
                 <div className="h-px bg-white/10 my-1" />
+                <button
+                  className="w-full text-left px-3 py-2 rounded-xl disabled:opacity-50"
+                  disabled={status === "loading" || status === "locating" || !coords}
+                  onClick={() => { setMenuOpen(false); refreshWeather(); }}
+                >
+                  {status === "loading" ? "Refreshing…" : "Refresh"}
+                </button>
                 <button
                   className="w-full text-left px-3 py-2 rounded-xl"
                   onClick={() => { setMenuOpen(false); resolveLocation(true); }}
@@ -596,7 +611,10 @@ export default function LazyWeather() {
         </div>
 
         {/* Page dots */}
-        <div className="flex justify-center gap-2 pb-6 pt-2">
+        <div
+          className="flex justify-center gap-2 pt-2"
+          style={{ paddingBottom: "max(1.5rem, env(safe-area-inset-bottom))" }}
+        >
           {[0, 1].map((i) => (
             <button
               key={i}

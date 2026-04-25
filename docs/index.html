@@ -28,8 +28,9 @@
   <script crossorigin src="https://unpkg.com/react-dom@18/umd/react-dom.production.min.js"></script>
   <script src="https://unpkg.com/@babel/standalone/babel.min.js"></script>
   <style>
-    html, body, #root { background: #000; min-height: 100%; }
-    body { margin: 0; }
+    html, body, #root { background: #000; }
+    html, body { height: 100%; }
+    body { margin: 0; min-height: 100dvh; overscroll-behavior-y: none; }
     .lw { font-family: 'JetBrains Mono', ui-monospace, SFMono-Regular, Menlo, monospace; }
     .lw-muted { color: #6b6b6b; }
     .lw-pill { background: #1a1a1a; border-radius: 999px; padding: 8px 16px; color: #cfcfcf; font-size: 15px; letter-spacing: 0.02em; }
@@ -108,7 +109,7 @@
         navigator.geolocation.getCurrentPosition(
           (pos) => resolve({ lat: pos.coords.latitude, lon: pos.coords.longitude }),
           (err) => reject(err),
-          { enableHighAccuracy: false, timeout: 15000, maximumAge: 5 * 60 * 1000 }
+          { enableHighAccuracy: false, timeout: 8000, maximumAge: 5 * 60 * 1000 }
         );
       });
     }
@@ -301,6 +302,11 @@
         };
       }, []);
 
+      const refreshWeather = () => {
+        if (!coords) return;
+        setCoords((c) => (c ? { ...c } : c));
+      };
+
       const dismissBanner = () => {
         setBannerDismissed(true);
         try { localStorage.setItem("lw-install-dismissed", "1"); } catch {}
@@ -345,9 +351,9 @@
       const locationLabel = status === "locating" && !city ? "*locating…*" : `*${city || "—"}*`;
 
       return (
-        <div className="min-h-screen w-full bg-black text-white lw select-none">
-          <div className="max-w-md mx-auto min-h-screen flex flex-col relative">
-            <div className="flex items-start justify-between px-5 pt-5 pb-2 z-10 gap-3">
+        <div className="min-h-screen min-h-[100dvh] w-full bg-black text-white lw select-none">
+          <div className="max-w-md mx-auto min-h-screen min-h-[100dvh] flex flex-col relative">
+            <div className="flex items-start justify-between px-5 pb-2 z-10 gap-3" style={{ paddingTop: "max(1.25rem, env(safe-area-inset-top))" }}>
               <div className="flex flex-col gap-1 min-w-0">
                 <div className="relative">
                   <button
@@ -410,6 +416,13 @@
                     <button className={`w-full text-left px-3 py-2 rounded-xl ${unit === "C" ? "bg-[#262626]" : ""}`} onClick={() => { setUnit("C"); setMenuOpen(false); }}>Celsius</button>
                     <button className={`w-full text-left px-3 py-2 rounded-xl ${unit === "F" ? "bg-[#262626]" : ""}`} onClick={() => { setUnit("F"); setMenuOpen(false); }}>Fahrenheit</button>
                     <div className="h-px bg-white/10 my-1" />
+                    <button
+                      className="w-full text-left px-3 py-2 rounded-xl disabled:opacity-50"
+                      disabled={status === "loading" || status === "locating" || !coords}
+                      onClick={() => { setMenuOpen(false); refreshWeather(); }}
+                    >
+                      {status === "loading" ? "Refreshing…" : "Refresh"}
+                    </button>
                     <button className="w-full text-left px-3 py-2 rounded-xl" onClick={() => { setMenuOpen(false); resolveLocation(true); }}>Use my location</button>
                   </div>
                 )}
@@ -470,7 +483,7 @@
               </section>
             </div>
 
-            <div className="flex justify-center gap-2 pb-6 pt-2">
+            <div className="flex justify-center gap-2 pt-2" style={{ paddingBottom: "max(1.5rem, env(safe-area-inset-bottom))" }}>
               {[0,1].map((i) => (
                 <button key={i} aria-label={`page ${i+1}`}
                   onClick={() => { const el = scrollerRef.current; if (el) el.scrollTo({ left: i * el.clientWidth, behavior: "smooth" }); }}
