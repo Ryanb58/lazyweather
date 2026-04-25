@@ -1,6 +1,6 @@
 {
-  "name": "Lazy Weather",
-  "short_name": "Lazy",
+  "name": "LazyWeather",
+  "short_name": "LazyWeather",
   "description": "A lazy forecast — today vs. yesterday and tomorrow vs. today, in plain words.",
   "start_url": ".",
   "scope": ".",
