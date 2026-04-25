@@ -394,7 +394,7 @@ export default function LazyWeather() {
                       if (e.key === "Escape") { setSearchOpen(false); setSearchQuery(""); }
                     }}
                     placeholder="Search a city…"
-                    className="w-full bg-transparent outline-none px-3 py-2 text-[14px] placeholder:text-[#6b6b6b]"
+                    className="w-full bg-transparent outline-none px-3 py-2 text-[16px] placeholder:text-[#6b6b6b]"
                   />
                   <div className="h-px bg-white/10 my-1" />
                   {searching && (

@@ -2,7 +2,7 @@
 <html lang="en">
 <head>
   <meta charset="utf-8" />
-  <meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover" />
+  <meta name="viewport" content="width=device-width,initial-scale=1,maximum-scale=1,user-scalable=no,viewport-fit=cover" />
   <title>Lazy Weather</title>
   <script src="https://cdn.tailwindcss.com"></script>
   <script crossorigin src="https://unpkg.com/react@18/umd/react.production.min.js"></script>
@@ -357,7 +357,7 @@
                         onChange={(e) => setSearchQuery(e.target.value)}
                         onKeyDown={(e) => { if (e.key === "Escape") { setSearchOpen(false); setSearchQuery(""); } }}
                         placeholder="Search a city…"
-                        className="w-full bg-transparent outline-none px-3 py-2 text-[14px] placeholder:text-[#6b6b6b]"
+                        className="w-full bg-transparent outline-none px-3 py-2 text-[16px] placeholder:text-[#6b6b6b]"
                       />
                       <div className="h-px bg-white/10 my-1" />
                       {searching && (
