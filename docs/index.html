@@ -257,6 +257,7 @@
       const [addSearching, setAddSearching] = useState(false);
       const scrollerRef = useRef(null);
       const searchInputRef = useRef(null);
+      const todayPageRef = useRef(null);
 
       const resolveLocation = useCallback(async (forceGeo = false) => {
         setStatus("locating"); setErr(null); setData(null); setGeoErr(null);
@@ -345,8 +346,20 @@
       }, [addQuery]);
 
       useLayoutEffect(() => {
-        const el = scrollerRef.current;
-        if (el) el.scrollLeft = el.clientWidth;
+        const scroller = scrollerRef.current;
+        const today = todayPageRef.current;
+        if (!scroller || !today) return;
+        const goToToday = () => {
+          if (!scroller.isConnected) return;
+          const w = scroller.clientWidth;
+          if (w > 0) scroller.scrollLeft = today.offsetLeft;
+        };
+        goToToday();
+        // Re-apply on next frame in case clientWidth wasn't measured yet.
+        const raf = requestAnimationFrame(() => {
+          if (scroller.scrollLeft === 0) goToToday();
+        });
+        return () => cancelAnimationFrame(raf);
       }, []);
 
       useEffect(() => {
@@ -636,7 +649,7 @@
                 </div>
               </section>
 
-              <section className="page min-w-full px-5 flex flex-col">
+              <section ref={todayPageRef} className="page min-w-full px-5 flex flex-col">
                 <div className="flex-1 flex items-center">
                   {status === "ready" && data ? <TodayHeadline deltaC={data.todayVsYesterdayC} /> :
                    status === "error" ? (
