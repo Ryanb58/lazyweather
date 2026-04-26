@@ -93,6 +93,36 @@ async function reverseGeocode(lat, lon) {
   return j.locality || j.city || j.principalSubdivision || j.countryName || "Here";
 }
 
+const SAVED_KEY = "lw-saved-locations";
+
+function loadSavedLocations() {
+  try {
+    if (typeof localStorage === "undefined") return [];
+    const raw = localStorage.getItem(SAVED_KEY);
+    if (!raw) return [];
+    const arr = JSON.parse(raw);
+    if (!Array.isArray(arr)) return [];
+    return arr.filter(
+      (p) =>
+        p &&
+        typeof p.city === "string" &&
+        typeof p.lat === "number" &&
+        typeof p.lon === "number"
+    );
+  } catch {
+    return [];
+  }
+}
+
+function sameLocation(a, b) {
+  if (!a || !b) return false;
+  return (
+    a.city === b.city &&
+    Math.abs(a.lat - b.lat) < 0.01 &&
+    Math.abs(a.lon - b.lon) < 0.01
+  );
+}
+
 async function fetchWeather(lat, lon) {
   const url =
     `https://api.open-meteo.com/v1/forecast` +
@@ -185,6 +215,7 @@ export default function LazyWeather() {
       return false;
     }
   });
+  const [saved, setSaved] = useState(loadSavedLocations);
   const scrollerRef = useRef(null);
   const searchInputRef = useRef(null);
 
@@ -256,6 +287,14 @@ export default function LazyWeather() {
   }, [searchOpen]);
 
   useEffect(() => {
+    try {
+      if (typeof localStorage !== "undefined") {
+        localStorage.setItem(SAVED_KEY, JSON.stringify(saved));
+      }
+    } catch {}
+  }, [saved]);
+
+  useEffect(() => {
     const ua = (typeof navigator !== "undefined" && navigator.userAgent) || "";
     const ios = /iPhone|iPad|iPod/i.test(ua);
     const android = /Android/i.test(ua);
@@ -323,6 +362,25 @@ export default function LazyWeather() {
     setCity(p.name);
     setCoords({ lat: p.latitude, lon: p.longitude });
   };
+
+  const currentLoc =
+    coords && city ? { city, lat: coords.lat, lon: coords.lon } : null;
+  const isCurrentSaved = !!currentLoc && saved.some((s) => sameLocation(s, currentLoc));
+
+  const toggleSaveCurrent = () => {
+    if (!currentLoc) return;
+    setSaved((prev) =>
+      prev.some((s) => sameLocation(s, currentLoc))
+        ? prev.filter((s) => !sameLocation(s, currentLoc))
+        : [...prev, currentLoc]
+    );
+  };
+
+  const removeSaved = (loc) =>
+    setSaved((prev) => prev.filter((s) => !sameLocation(s, loc)));
+
+  const pickSaved = (loc) =>
+    pickPlace({ name: loc.city, latitude: loc.lat, longitude: loc.lon });
 
   const onScroll = () => {
     const el = scrollerRef.current;
@@ -416,7 +474,55 @@ export default function LazyWeather() {
                     <div className="px-3 py-2 lw-muted text-[12px]">no matches</div>
                   )}
                   {searchQuery.trim().length < 2 && !searching && (
-                    <div className="px-3 py-2 lw-muted text-[11px]">Type at least 2 characters.</div>
+                    <>
+                      {saved.length > 0 && (
+                        <>
+                          <div className="px-3 pt-1 pb-1 lw-muted text-[11px] uppercase tracking-wider">
+                            Saved
+                          </div>
+                          {saved.map((loc) => (
+                            <div
+                              key={`${loc.city}-${loc.lat}-${loc.lon}`}
+                              className="flex items-center"
+                            >
+                              <button
+                                className="flex-1 text-left px-3 py-2 rounded-xl hover:bg-[#262626] truncate"
+                                onClick={() => pickSaved(loc)}
+                              >
+                                <span className="text-[14px]">*{loc.city}*</span>
+                              </button>
+                              <button
+                                className="lw-muted px-3 py-2 text-base leading-none hover:text-white"
+                                aria-label={`Remove ${loc.city}`}
+                                onClick={() => removeSaved(loc)}
+                              >
+                                ×
+                              </button>
+                            </div>
+                          ))}
+                        </>
+                      )}
+                      {currentLoc ? (
+                        <button
+                          className="w-full text-left px-3 py-2 rounded-xl hover:bg-[#262626] flex items-center gap-2"
+                          onClick={toggleSaveCurrent}
+                        >
+                          <span className="lw-muted w-4 text-center">
+                            {isCurrentSaved ? "✓" : "+"}
+                          </span>
+                          <span className="text-[14px]">
+                            {isCurrentSaved ? "Saved " : "Save "}
+                            <span className="lw-muted">*{currentLoc.city}*</span>
+                          </span>
+                        </button>
+                      ) : (
+                        saved.length === 0 && (
+                          <div className="px-3 py-2 lw-muted text-[11px]">
+                            Type at least 2 characters.
+                          </div>
+                        )
+                      )}
+                    </>
                   )}
                   <div className="h-px bg-white/10 my-1" />
                   <button
