@@ -44,7 +44,7 @@
   <div id="root"></div>
 
   <script type="text/babel" data-presets="react">
-    const { useCallback, useEffect, useRef, useState, Fragment } = React;
+    const { useCallback, useEffect, useLayoutEffect, useRef, useState, Fragment } = React;
 
     const FALLBACK = { lat: 47.6101, lon: -122.2015, city: "Bellevue" };
     const SLOTS = [
@@ -166,6 +166,17 @@
       return { slotsToday, slotsTomorrow, todayVsYesterdayC: tAvg - yAvg, tomorrowVsTodayC: tmAvg - tAvg, tomorrowCode };
     }
 
+    async function fetchCurrentWeather(lat, lon) {
+      const url = `https://api.open-meteo.com/v1/forecast?latitude=${lat}&longitude=${lon}&current=temperature_2m,weathercode,is_day&timezone=auto`;
+      const r = await fetch(url);
+      if (!r.ok) throw new Error(`HTTP ${r.status}`);
+      const j = await r.json();
+      const c = j.current || {};
+      return { tempC: c.temperature_2m, code: c.weathercode ?? 0, isDay: c.is_day === 1 };
+    }
+
+    const wxKey = (loc) => `${loc.lat.toFixed(4)},${loc.lon.toFixed(4)}`;
+
     function Dotgrid() {
       return (
         <svg width="18" height="18" viewBox="0 0 18 18" className="inline-block opacity-70">
@@ -228,7 +239,7 @@
       const [usingFallback, setUsingFallback] = useState(false);
       const [unit, setUnit] = useState("C");
       const [menuOpen, setMenuOpen] = useState(false);
-      const [page, setPage] = useState(0);
+      const [page, setPage] = useState(1);
       const [searchOpen, setSearchOpen] = useState(false);
       const [searchQuery, setSearchQuery] = useState("");
       const [searchResults, setSearchResults] = useState([]);
@@ -240,6 +251,10 @@
         try { return localStorage.getItem("lw-install-dismissed") === "1"; } catch { return false; }
       });
       const [saved, setSaved] = useState(loadSavedLocations);
+      const [savedWx, setSavedWx] = useState({});
+      const [addQuery, setAddQuery] = useState("");
+      const [addResults, setAddResults] = useState([]);
+      const [addSearching, setAddSearching] = useState(false);
       const scrollerRef = useRef(null);
       const searchInputRef = useRef(null);
 
@@ -302,6 +317,37 @@
       useEffect(() => {
         try { localStorage.setItem(SAVED_KEY, JSON.stringify(saved)); } catch {}
       }, [saved]);
+
+      useEffect(() => {
+        let cancelled = false;
+        saved.forEach((loc) => {
+          const key = wxKey(loc);
+          if (savedWx[key]) return;
+          fetchCurrentWeather(loc.lat, loc.lon)
+            .then((wx) => { if (!cancelled) setSavedWx((m) => ({ ...m, [key]: wx })); })
+            .catch(() => {});
+        });
+        return () => { cancelled = true; };
+      }, [saved]);
+
+      useEffect(() => {
+        const q = addQuery.trim();
+        if (q.length < 2) { setAddResults([]); setAddSearching(false); return; }
+        let cancelled = false;
+        setAddSearching(true);
+        const t = setTimeout(() => {
+          searchPlaces(q)
+            .then((rs) => { if (!cancelled) setAddResults(rs); })
+            .catch(() => { if (!cancelled) setAddResults([]); })
+            .finally(() => { if (!cancelled) setAddSearching(false); });
+        }, 250);
+        return () => { cancelled = true; clearTimeout(t); };
+      }, [addQuery]);
+
+      useLayoutEffect(() => {
+        const el = scrollerRef.current;
+        if (el) el.scrollLeft = el.clientWidth;
+      }, []);
 
       useEffect(() => {
         const ua = navigator.userAgent || "";
@@ -371,7 +417,26 @@
           : [...prev, currentLoc]);
       };
       const removeSaved = (loc) => setSaved((prev) => prev.filter((s) => !sameLocation(s, loc)));
-      const pickSaved = (loc) => pickPlace({ name: loc.city, latitude: loc.lat, longitude: loc.lon });
+      const pickSaved = (loc) => {
+        pickPlace({ name: loc.city, latitude: loc.lat, longitude: loc.lon });
+        const el = scrollerRef.current;
+        if (el) el.scrollTo({ left: el.clientWidth, behavior: "smooth" });
+      };
+      const addToSaved = (p) => {
+        const loc = { city: p.name, lat: p.latitude, lon: p.longitude };
+        setSaved((prev) => prev.some((s) => sameLocation(s, loc)) ? prev : [...prev, loc]);
+        setAddQuery("");
+        setAddResults([]);
+      };
+      const moveSaved = (i, dir) => {
+        setSaved((prev) => {
+          const j = i + dir;
+          if (j < 0 || j >= prev.length) return prev;
+          const next = prev.slice();
+          [next[i], next[j]] = [next[j], next[i]];
+          return next;
+        });
+      };
 
       const onScroll = () => {
         const el = scrollerRef.current; if (!el) return;
@@ -422,44 +487,20 @@
                         <div className="px-3 py-2 lw-muted text-[12px]">no matches</div>
                       )}
                       {searchQuery.trim().length < 2 && !searching && (
-                        <Fragment>
-                          {saved.length > 0 && (
-                            <Fragment>
-                              <div className="px-3 pt-1 pb-1 lw-muted text-[11px] uppercase tracking-wider">Saved</div>
-                              {saved.map((loc) => (
-                                <div key={`${loc.city}-${loc.lat}-${loc.lon}`} className="flex items-center">
-                                  <button
-                                    className="flex-1 text-left px-3 py-2 rounded-xl hover:bg-[#262626] truncate"
-                                    onClick={() => pickSaved(loc)}
-                                  >
-                                    <span className="text-[14px]">*{loc.city}*</span>
-                                  </button>
-                                  <button
-                                    className="lw-muted px-3 py-2 text-base leading-none hover:text-white"
-                                    aria-label={`Remove ${loc.city}`}
-                                    onClick={() => removeSaved(loc)}
-                                  >×</button>
-                                </div>
-                              ))}
-                            </Fragment>
-                          )}
-                          {currentLoc ? (
-                            <button
-                              className="w-full text-left px-3 py-2 rounded-xl hover:bg-[#262626] flex items-center gap-2"
-                              onClick={toggleSaveCurrent}
-                            >
-                              <span className="lw-muted w-4 text-center">{isCurrentSaved ? "✓" : "+"}</span>
-                              <span className="text-[14px]">
-                                {isCurrentSaved ? "Saved " : "Save "}
-                                <span className="lw-muted">*{currentLoc.city}*</span>
-                              </span>
-                            </button>
-                          ) : (
-                            saved.length === 0 && (
-                              <div className="px-3 py-2 lw-muted text-[11px]">Type at least 2 characters.</div>
-                            )
-                          )}
-                        </Fragment>
+                        currentLoc ? (
+                          <button
+                            className="w-full text-left px-3 py-2 rounded-xl hover:bg-[#262626] flex items-center gap-2"
+                            onClick={toggleSaveCurrent}
+                          >
+                            <span className="lw-muted w-4 text-center">{isCurrentSaved ? "✓" : "+"}</span>
+                            <span className="text-[14px]">
+                              {isCurrentSaved ? "Saved " : "Save "}
+                              <span className="lw-muted">*{currentLoc.city}*</span>
+                            </span>
+                          </button>
+                        ) : (
+                          <div className="px-3 py-2 lw-muted text-[11px]">Type at least 2 characters.</div>
+                        )
                       )}
                       <div className="h-px bg-white/10 my-1" />
                       <button
@@ -509,6 +550,93 @@
 
             <div ref={scrollerRef} onScroll={onScroll} className="scroller flex-1 min-h-0 overflow-x-auto overflow-y-hidden flex">
               <section className="page min-w-full px-5 flex flex-col">
+                <div className="text-[26px] leading-[1.35] pt-2">
+                  <div>Your saved</div>
+                  <div className="lw-muted tracking-wide">PLACES</div>
+                </div>
+                <div className="relative pt-4">
+                  <input
+                    value={addQuery}
+                    onChange={(e) => setAddQuery(e.target.value)}
+                    onKeyDown={(e) => { if (e.key === "Escape") { setAddQuery(""); setAddResults([]); } }}
+                    placeholder="Search to add a place…"
+                    className="w-full bg-[#1a1a1a] rounded-2xl outline-none px-4 py-3 text-[16px] placeholder:text-[#6b6b6b]"
+                  />
+                  {(addSearching || (addQuery.trim().length >= 2 && !addSearching)) && (
+                    <div className="absolute left-0 right-0 mt-2 rounded-2xl bg-[#1a1a1a] p-2 z-10 shadow-lg">
+                      {addSearching && <div className="px-3 py-2 lw-muted text-[12px]">searching…</div>}
+                      {!addSearching && addResults.map((p) => {
+                        const exists = saved.some((s) => sameLocation(s, { city: p.name, lat: p.latitude, lon: p.longitude }));
+                        return (
+                          <button
+                            key={`${p.id}-${p.latitude}-${p.longitude}`}
+                            className="w-full text-left px-3 py-2 rounded-xl hover:bg-[#262626] disabled:opacity-40"
+                            disabled={exists}
+                            onClick={() => addToSaved(p)}
+                          >
+                            <div className="text-[14px]">{p.name}{exists ? " · added" : ""}</div>
+                            <div className="lw-muted text-[11px]">{[p.admin1, p.country].filter(Boolean).join(", ")}</div>
+                          </button>
+                        );
+                      })}
+                      {!addSearching && addQuery.trim().length >= 2 && addResults.length === 0 && (
+                        <div className="px-3 py-2 lw-muted text-[12px]">no matches</div>
+                      )}
+                    </div>
+                  )}
+                </div>
+                <div className="flex-1 min-h-0 overflow-y-auto pt-4 pb-10">
+                  {saved.length === 0 ? (
+                    <div className="lw-muted text-[13px]">No saved places yet. Search above to add one.</div>
+                  ) : (
+                    saved.map((loc, i) => {
+                      const wx = savedWx[wxKey(loc)];
+                      const isFirst = i === 0;
+                      const isLast = i === saved.length - 1;
+                      return (
+                        <div
+                          key={`${loc.city}-${loc.lat}-${loc.lon}`}
+                          className="grid items-center py-1.5 gap-1"
+                          style={{ gridTemplateColumns: "1fr auto auto auto auto auto" }}
+                        >
+                          <button
+                            className="text-left text-[18px] truncate hover:text-white pr-2"
+                            onClick={() => pickSaved(loc)}
+                            aria-label={`Switch to ${loc.city}`}
+                          >
+                            *{loc.city}*
+                          </button>
+                          <div className="text-[16px] tabular-nums lw-muted text-right min-w-[4ch]">
+                            {wx ? fmtTemp(wx.tempC, unit) : "…"}
+                          </div>
+                          <div className="text-[18px] lw-muted w-6 text-center">
+                            {wx ? codeGlyph(wx.code, !wx.isDay) : ""}
+                          </div>
+                          <button
+                            className="lw-muted w-8 h-8 grid place-items-center rounded-full hover:bg-[#1a1a1a] disabled:opacity-25"
+                            aria-label={`Move ${loc.city} up`}
+                            disabled={isFirst}
+                            onClick={() => moveSaved(i, -1)}
+                          >↑</button>
+                          <button
+                            className="lw-muted w-8 h-8 grid place-items-center rounded-full hover:bg-[#1a1a1a] disabled:opacity-25"
+                            aria-label={`Move ${loc.city} down`}
+                            disabled={isLast}
+                            onClick={() => moveSaved(i, 1)}
+                          >↓</button>
+                          <button
+                            className="lw-muted w-8 h-8 grid place-items-center rounded-full hover:bg-[#1a1a1a] text-base"
+                            aria-label={`Remove ${loc.city}`}
+                            onClick={() => removeSaved(loc)}
+                          >×</button>
+                        </div>
+                      );
+                    })
+                  )}
+                </div>
+              </section>
+
+              <section className="page min-w-full px-5 flex flex-col">
                 <div className="flex-1 flex items-center">
                   {status === "ready" && data ? <TodayHeadline deltaC={data.todayVsYesterdayC} /> :
                    status === "error" ? (
@@ -552,7 +680,7 @@
             </div>
 
             <div className="flex justify-center gap-2 pt-2" style={{ paddingBottom: "max(1.5rem, env(safe-area-inset-bottom))" }}>
-              {[0,1].map((i) => (
+              {[0,1,2].map((i) => (
                 <button key={i} aria-label={`page ${i+1}`}
                   onClick={() => { const el = scrollerRef.current; if (el) el.scrollTo({ left: i * el.clientWidth, behavior: "smooth" }); }}
                   className="w-1.5 h-1.5 rounded-full" style={{ background: page === i ? "#e5e5e5" : "#3a3a3a" }} />
