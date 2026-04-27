@@ -33,8 +33,9 @@
     body { margin: 0; overflow: hidden; overscroll-behavior-y: none; }
     .lw { font-family: 'JetBrains Mono', ui-monospace, SFMono-Regular, Menlo, monospace; }
     .lw-muted { color: #6b6b6b; }
-    .lw-pill { background: #1a1a1a; border-radius: 999px; padding: 8px 16px; color: #cfcfcf; font-size: 15px; letter-spacing: 0.02em; }
-    .lw-iconbtn { width: 40px; height: 40px; border-radius: 999px; background: #1a1a1a; color: #cfcfcf; display: grid; place-items: center; }
+    .lw-pill { background: #1a1a1a; border-radius: 999px; padding: 10px 16px; color: #cfcfcf; font-size: 15px; letter-spacing: 0.02em; min-height: 44px; display: inline-flex; align-items: center; line-height: 1.25; }
+    .lw-iconbtn { width: 44px; height: 44px; border-radius: 999px; background: #1a1a1a; color: #cfcfcf; display: grid; place-items: center; }
+    button, a { -webkit-tap-highlight-color: transparent; }
     .scroller { scroll-snap-type: x mandatory; -webkit-overflow-scrolling: touch; scrollbar-width: none; }
     .scroller::-webkit-scrollbar { display: none; }
     .page { scroll-snap-align: start; scroll-snap-stop: always; }
@@ -530,7 +531,7 @@
                         onChange={(e) => setSearchQuery(e.target.value)}
                         onKeyDown={(e) => { if (e.key === "Escape") { setSearchOpen(false); setSearchQuery(""); } }}
                         placeholder="Search a city…"
-                        className="w-full bg-transparent outline-none px-3 py-2 text-[14px] placeholder:text-[#6b6b6b]"
+                        className="w-full bg-transparent outline-none px-3 py-3 text-[16px] placeholder:text-[#6b6b6b]"
                       />
                       <div className="h-px bg-white/10 my-1" />
                       {searching && (
@@ -539,7 +540,7 @@
                       {!searching && searchResults.map((p) => (
                         <button
                           key={`${p.id}-${p.latitude}-${p.longitude}`}
-                          className="w-full text-left px-3 py-2 rounded-xl hover:bg-[#262626]"
+                          className="w-full text-left px-3 py-3 rounded-xl hover:bg-[#262626]"
                           onClick={() => pickPlace(p)}
                         >
                           <div className="text-[14px]">{p.name}</div>
@@ -552,7 +553,7 @@
                       {searchQuery.trim().length < 2 && !searching && (
                         currentLoc ? (
                           <button
-                            className="w-full text-left px-3 py-2 rounded-xl hover:bg-[#262626] flex items-center gap-2"
+                            className="w-full text-left px-3 py-3 rounded-xl hover:bg-[#262626] flex items-center gap-2"
                             onClick={toggleSaveCurrent}
                           >
                             <span className="lw-muted w-4 text-center">{isCurrentSaved ? "✓" : "+"}</span>
@@ -567,7 +568,7 @@
                       )}
                       <div className="h-px bg-white/10 my-1" />
                       <button
-                        className="w-full text-left px-3 py-2 rounded-xl hover:bg-[#262626] flex items-center gap-2"
+                        className="w-full text-left px-3 py-3 rounded-xl hover:bg-[#262626] flex items-center gap-2"
                         onClick={() => { setSearchOpen(false); setSearchQuery(""); setSearchResults([]); resolveLocation(true); }}
                       >
                         <span className="lw-muted w-4 text-center">⌖</span>
@@ -585,11 +586,11 @@
                 {menuOpen && (
                   <div className="absolute right-0 mt-2 rounded-2xl bg-[#1a1a1a] p-2 w-52 text-sm z-20" onMouseLeave={() => setMenuOpen(false)}>
                     <div className="px-3 pt-1 pb-1 lw-muted text-[11px] uppercase tracking-wider">Units</div>
-                    <button className={`w-full text-left px-3 py-2 rounded-xl ${unit === "C" ? "bg-[#262626]" : ""}`} onClick={() => { setUnit("C"); setMenuOpen(false); }}>Celsius</button>
-                    <button className={`w-full text-left px-3 py-2 rounded-xl ${unit === "F" ? "bg-[#262626]" : ""}`} onClick={() => { setUnit("F"); setMenuOpen(false); }}>Fahrenheit</button>
+                    <button className={`w-full text-left px-3 py-3 rounded-xl ${unit === "C" ? "bg-[#262626]" : ""}`} onClick={() => { setUnit("C"); setMenuOpen(false); }}>Celsius</button>
+                    <button className={`w-full text-left px-3 py-3 rounded-xl ${unit === "F" ? "bg-[#262626]" : ""}`} onClick={() => { setUnit("F"); setMenuOpen(false); }}>Fahrenheit</button>
                     <div className="h-px bg-white/10 my-1" />
                     <button
-                      className="w-full text-left px-3 py-2 rounded-xl disabled:opacity-50"
+                      className="w-full text-left px-3 py-3 rounded-xl disabled:opacity-50"
                       disabled={status === "loading" || status === "locating" || !coords}
                       onClick={() => { setMenuOpen(false); refreshWeather(); }}
                     >
@@ -597,7 +598,7 @@
                     </button>
                     <div className="h-px bg-white/10 my-1" />
                     <button
-                      className="w-full text-left px-3 py-2 rounded-xl hover:bg-[#262626]"
+                      className="w-full text-left px-3 py-3 rounded-xl hover:bg-[#262626]"
                       onClick={() => { setMenuOpen(false); setAboutOpen(true); }}
                     >
                       About
@@ -608,12 +609,12 @@
             </div>
 
             {showInstallBanner && (
-              <div className="px-5 py-2 flex items-center justify-between gap-3 text-[12px] border-y border-white/5">
-                <button onClick={triggerInstall} className="lw-muted text-left truncate">
+              <div className="px-5 flex items-center justify-between gap-3 text-[12px] border-y border-white/5 min-h-11">
+                <button onClick={triggerInstall} className="lw-muted text-left truncate self-stretch flex items-center">
                   <span className="text-white/90 underline underline-offset-2">Add to home screen</span>
                   <span> for the cleanest view</span>
                 </button>
-                <button onClick={dismissBanner} aria-label="Dismiss" className="lw-muted shrink-0 w-6 text-base leading-none">×</button>
+                <button onClick={dismissBanner} aria-label="Dismiss" className="lw-muted shrink-0 w-11 h-11 grid place-items-center text-base leading-none -mr-2">×</button>
               </div>
             )}
 
@@ -626,7 +627,7 @@
                   </div>
                   {saved.length > 0 && (
                     <button
-                      className="text-[13px] underline underline-offset-2 pb-2 shrink-0"
+                      className="text-[13px] underline underline-offset-2 shrink-0 min-h-11 min-w-11 px-2 -mr-2 flex items-center justify-end"
                       onClick={() => { dragFromRef.current = null; setDragIdx(null); setEditMode((v) => !v); }}
                     >
                       {editMode ? "Done" : "Edit"}
@@ -649,7 +650,7 @@
                         return (
                           <button
                             key={`${p.id}-${p.latitude}-${p.longitude}`}
-                            className="w-full text-left px-3 py-2 rounded-xl hover:bg-[#262626] disabled:opacity-40"
+                            className="w-full text-left px-3 py-3 rounded-xl hover:bg-[#262626] disabled:opacity-40"
                             disabled={exists}
                             onClick={() => addToSaved(p)}
                           >
@@ -679,7 +680,7 @@
                         >
                           {editMode && (
                             <button
-                              className="lw-muted w-8 h-8 grid place-items-center cursor-grab active:cursor-grabbing select-none"
+                              className="lw-muted w-11 h-11 grid place-items-center cursor-grab active:cursor-grabbing select-none -ml-2"
                               style={{ touchAction: "none" }}
                               onPointerDown={onDragHandleDown(i)}
                               onPointerMove={onDragHandleMove}
@@ -689,10 +690,10 @@
                             >≡</button>
                           )}
                           {editMode ? (
-                            <div className="flex-1 text-[18px] truncate pr-2">*{loc.city}*</div>
+                            <div className="flex-1 text-[18px] truncate pr-2 min-h-11 flex items-center">*{loc.city}*</div>
                           ) : (
                             <button
-                              className="flex-1 text-left text-[18px] truncate hover:text-white pr-2"
+                              className="flex-1 text-left text-[18px] truncate hover:text-white pr-2 min-h-11 flex items-center"
                               onClick={() => pickSaved(loc)}
                               aria-label={`Switch to ${loc.city}`}
                             >
@@ -707,7 +708,7 @@
                           </div>
                           {editMode && (
                             <button
-                              className="lw-muted w-8 h-8 grid place-items-center rounded-full hover:bg-[#1a1a1a] text-base"
+                              className="lw-muted w-11 h-11 grid place-items-center rounded-full hover:bg-[#1a1a1a] text-base -mr-2"
                               aria-label={`Remove ${loc.city}`}
                               onClick={() => removeSaved(loc)}
                             >×</button>
@@ -773,12 +774,12 @@
                   className="bg-[#1a1a1a] rounded-2xl p-6 max-w-sm w-full"
                   onClick={(e) => e.stopPropagation()}
                 >
-                  <div className="flex items-start justify-between mb-4">
-                    <div className="lw-muted text-[11px] uppercase tracking-wider pt-1">About</div>
+                  <div className="flex items-center justify-between mb-3 -mt-2 -mr-2">
+                    <div className="lw-muted text-[11px] uppercase tracking-wider">About</div>
                     <button
                       onClick={() => setAboutOpen(false)}
                       aria-label="Close"
-                      className="lw-muted text-xl leading-none -mt-1"
+                      className="lw-muted w-11 h-11 grid place-items-center text-xl leading-none"
                     >×</button>
                   </div>
                   <div className="text-[14px] leading-[1.7]">
@@ -810,11 +811,14 @@
               </div>
             )}
 
-            <div className="flex justify-center gap-2 pt-2" style={{ paddingBottom: "max(1.5rem, env(safe-area-inset-bottom))" }}>
+            <div className="flex justify-center" style={{ paddingBottom: "max(1.5rem, env(safe-area-inset-bottom))" }}>
               {[0,1,2].map((i) => (
                 <button key={i} aria-label={`page ${i+1}`}
                   onClick={() => { const el = scrollerRef.current; if (el) el.scrollTo({ left: i * el.clientWidth, behavior: "smooth" }); }}
-                  className="w-1.5 h-1.5 rounded-full" style={{ background: page === i ? "#e5e5e5" : "#3a3a3a" }} />
+                  className="w-11 h-11 grid place-items-center"
+                >
+                  <span className="block w-1.5 h-1.5 rounded-full" style={{ background: page === i ? "#e5e5e5" : "#3a3a3a" }} />
+                </button>
               ))}
             </div>
           </div>
