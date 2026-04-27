@@ -250,6 +250,7 @@
       const [bannerDismissed, setBannerDismissed] = useState(() => {
         try { return localStorage.getItem("lw-install-dismissed") === "1"; } catch { return false; }
       });
+      const [aboutOpen, setAboutOpen] = useState(false);
       const [saved, setSaved] = useState(loadSavedLocations);
       const [savedWx, setSavedWx] = useState({});
       const [addQuery, setAddQuery] = useState("");
@@ -344,6 +345,20 @@
         }, 250);
         return () => { cancelled = true; clearTimeout(t); };
       }, [addQuery]);
+
+      useEffect(() => {
+        if (!searchOpen && !menuOpen) return;
+        const onDown = (e) => {
+          if (searchOpen && !e.target.closest("[data-lw-search]")) setSearchOpen(false);
+          if (menuOpen && !e.target.closest("[data-lw-menu]")) setMenuOpen(false);
+        };
+        document.addEventListener("mousedown", onDown);
+        document.addEventListener("touchstart", onDown);
+        return () => {
+          document.removeEventListener("mousedown", onDown);
+          document.removeEventListener("touchstart", onDown);
+        };
+      }, [searchOpen, menuOpen]);
 
       useLayoutEffect(() => {
         const scroller = scrollerRef.current;
@@ -454,7 +469,11 @@
       const onScroll = () => {
         const el = scrollerRef.current; if (!el) return;
         const idx = Math.round(el.scrollLeft / el.clientWidth);
-        if (idx !== page) setPage(idx);
+        if (idx !== page) {
+          setPage(idx);
+          setSearchOpen(false);
+          setMenuOpen(false);
+        }
       };
 
       const locationLabel = status === "locating" && !city ? "*locating…*" : `*${city || "—"}*`;
@@ -464,7 +483,7 @@
           <div className="max-w-md mx-auto h-full flex flex-col relative">
             <div className="flex items-start justify-between px-5 pb-2 z-10 gap-3" style={{ paddingTop: "max(1.25rem, env(safe-area-inset-top))" }}>
               <div className="flex flex-col gap-1 min-w-0">
-                <div className="relative">
+                <div className="relative" data-lw-search>
                   <button
                     className="lw-pill truncate max-w-[60vw] hover:bg-[#222] transition cursor-pointer text-left"
                     onClick={() => { setMenuOpen(false); setSearchOpen((v) => !v); }}
@@ -528,7 +547,7 @@
                 </div>
                 {usingFallback && <div className="text-[11px] lw-muted pl-2">fallback{geoErr ? ` · ${geoErr}` : ""} · tap … to retry</div>}
               </div>
-              <div className="relative">
+              <div className="relative" data-lw-menu>
                 <button className="lw-iconbtn" onClick={() => { setSearchOpen(false); setMenuOpen((v) => !v); }} aria-label="menu">
                   <span className="text-xl leading-none -mt-2">…</span>
                 </button>
@@ -545,7 +564,13 @@
                     >
                       {status === "loading" ? "Refreshing…" : "Refresh"}
                     </button>
-                    <button className="w-full text-left px-3 py-2 rounded-xl" onClick={() => { setMenuOpen(false); resolveLocation(true); }}>Use my location</button>
+                    <div className="h-px bg-white/10 my-1" />
+                    <button
+                      className="w-full text-left px-3 py-2 rounded-xl hover:bg-[#262626]"
+                      onClick={() => { setMenuOpen(false); setAboutOpen(true); }}
+                    >
+                      About
+                    </button>
                   </div>
                 )}
               </div>
@@ -691,6 +716,43 @@
                 </div>
               </section>
             </div>
+
+            {aboutOpen && (
+              <div
+                className="fixed inset-0 z-50 bg-black/85 flex items-center justify-center p-6"
+                onClick={() => setAboutOpen(false)}
+                role="dialog"
+                aria-modal="true"
+              >
+                <div
+                  className="bg-[#1a1a1a] rounded-2xl p-6 max-w-sm w-full"
+                  onClick={(e) => e.stopPropagation()}
+                >
+                  <div className="flex items-start justify-between mb-4">
+                    <div className="lw-muted text-[11px] uppercase tracking-wider pt-1">About</div>
+                    <button
+                      onClick={() => setAboutOpen(false)}
+                      aria-label="Close"
+                      className="lw-muted text-xl leading-none -mt-1"
+                    >×</button>
+                  </div>
+                  <div className="text-[14px] leading-[1.7]">
+                    <div>Crafted with <span className="text-white">{'<3'}</span> by</div>
+                    <a
+                      href="https://taylorbrazelton.com"
+                      target="_blank"
+                      rel="noopener noreferrer"
+                      className="underline underline-offset-2"
+                    >
+                      *Taylor Brazelton*
+                    </a>
+                  </div>
+                  <div className="lw-muted text-[12px] leading-[1.7] mt-5">
+                    Forecast and city search from Open-Meteo. Reverse geocoding from BigDataCloud.
+                  </div>
+                </div>
+              </div>
+            )}
 
             <div className="flex justify-center gap-2 pt-2" style={{ paddingBottom: "max(1.5rem, env(safe-area-inset-bottom))" }}>
               {[0,1,2].map((i) => (
