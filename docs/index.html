@@ -256,6 +256,9 @@
       const [addQuery, setAddQuery] = useState("");
       const [addResults, setAddResults] = useState([]);
       const [addSearching, setAddSearching] = useState(false);
+      const [editMode, setEditMode] = useState(false);
+      const [dragIdx, setDragIdx] = useState(null);
+      const dragFromRef = useRef(null);
       const scrollerRef = useRef(null);
       const searchInputRef = useRef(null);
       const todayPageRef = useRef(null);
@@ -319,6 +322,10 @@
       useEffect(() => {
         try { localStorage.setItem(SAVED_KEY, JSON.stringify(saved)); } catch {}
       }, [saved]);
+
+      useEffect(() => {
+        if (saved.length === 0 && editMode) setEditMode(false);
+      }, [saved.length, editMode]);
 
       useEffect(() => {
         let cancelled = false;
@@ -456,14 +463,38 @@
         setAddQuery("");
         setAddResults([]);
       };
-      const moveSaved = (i, dir) => {
+      const reorderSaved = (from, to) => {
         setSaved((prev) => {
-          const j = i + dir;
-          if (j < 0 || j >= prev.length) return prev;
+          if (from === to || from < 0 || to < 0 || from >= prev.length || to >= prev.length) return prev;
           const next = prev.slice();
-          [next[i], next[j]] = [next[j], next[i]];
+          const [item] = next.splice(from, 1);
+          next.splice(to, 0, item);
           return next;
         });
+      };
+
+      const onDragHandleDown = (i) => (e) => {
+        e.preventDefault();
+        try { e.currentTarget.setPointerCapture(e.pointerId); } catch {}
+        dragFromRef.current = i;
+        setDragIdx(i);
+      };
+      const onDragHandleMove = (e) => {
+        if (dragFromRef.current === null) return;
+        const target = document.elementFromPoint(e.clientX, e.clientY);
+        const row = target && target.closest("[data-saved-row]");
+        if (!row) return;
+        const overIdx = parseInt(row.dataset.savedRow, 10);
+        if (Number.isNaN(overIdx) || overIdx === dragFromRef.current) return;
+        reorderSaved(dragFromRef.current, overIdx);
+        dragFromRef.current = overIdx;
+        setDragIdx(overIdx);
+      };
+      const onDragHandleUp = (e) => {
+        if (dragFromRef.current === null) return;
+        try { e.currentTarget.releasePointerCapture(e.pointerId); } catch {}
+        dragFromRef.current = null;
+        setDragIdx(null);
       };
 
       const onScroll = () => {
@@ -588,9 +619,19 @@
 
             <div ref={scrollerRef} onScroll={onScroll} className="scroller flex-1 min-h-0 overflow-x-auto overflow-y-hidden flex">
               <section className="page min-w-full px-5 flex flex-col">
-                <div className="text-[26px] leading-[1.35] pt-2">
-                  <div>Your saved</div>
-                  <div className="lw-muted tracking-wide">PLACES</div>
+                <div className="flex items-end justify-between pt-2 gap-3">
+                  <div className="text-[26px] leading-[1.35]">
+                    <div>Your saved</div>
+                    <div className="lw-muted tracking-wide">PLACES</div>
+                  </div>
+                  {saved.length > 0 && (
+                    <button
+                      className="text-[13px] underline underline-offset-2 pb-2 shrink-0"
+                      onClick={() => { dragFromRef.current = null; setDragIdx(null); setEditMode((v) => !v); }}
+                    >
+                      {editMode ? "Done" : "Edit"}
+                    </button>
+                  )}
                 </div>
                 <div className="relative pt-4">
                   <input
@@ -629,44 +670,48 @@
                   ) : (
                     saved.map((loc, i) => {
                       const wx = savedWx[wxKey(loc)];
-                      const isFirst = i === 0;
-                      const isLast = i === saved.length - 1;
                       return (
                         <div
                           key={`${loc.city}-${loc.lat}-${loc.lon}`}
-                          className="grid items-center py-1.5 gap-1"
-                          style={{ gridTemplateColumns: "1fr auto auto auto auto auto" }}
+                          data-saved-row={i}
+                          className="flex items-center py-1.5 gap-2"
+                          style={{ opacity: dragIdx === i ? 0.4 : 1, transition: "opacity 120ms" }}
                         >
-                          <button
-                            className="text-left text-[18px] truncate hover:text-white pr-2"
-                            onClick={() => pickSaved(loc)}
-                            aria-label={`Switch to ${loc.city}`}
-                          >
-                            *{loc.city}*
-                          </button>
+                          {editMode && (
+                            <button
+                              className="lw-muted w-8 h-8 grid place-items-center cursor-grab active:cursor-grabbing select-none"
+                              style={{ touchAction: "none" }}
+                              onPointerDown={onDragHandleDown(i)}
+                              onPointerMove={onDragHandleMove}
+                              onPointerUp={onDragHandleUp}
+                              onPointerCancel={onDragHandleUp}
+                              aria-label={`Reorder ${loc.city}`}
+                            >≡</button>
+                          )}
+                          {editMode ? (
+                            <div className="flex-1 text-[18px] truncate pr-2">*{loc.city}*</div>
+                          ) : (
+                            <button
+                              className="flex-1 text-left text-[18px] truncate hover:text-white pr-2"
+                              onClick={() => pickSaved(loc)}
+                              aria-label={`Switch to ${loc.city}`}
+                            >
+                              *{loc.city}*
+                            </button>
+                          )}
                           <div className="text-[16px] tabular-nums lw-muted text-right min-w-[4ch]">
                             {wx ? fmtTemp(wx.tempC, unit) : "…"}
                           </div>
                           <div className="text-[18px] lw-muted w-6 text-center">
                             {wx ? codeGlyph(wx.code, !wx.isDay) : ""}
                           </div>
-                          <button
-                            className="lw-muted w-8 h-8 grid place-items-center rounded-full hover:bg-[#1a1a1a] disabled:opacity-25"
-                            aria-label={`Move ${loc.city} up`}
-                            disabled={isFirst}
-                            onClick={() => moveSaved(i, -1)}
-                          >↑</button>
-                          <button
-                            className="lw-muted w-8 h-8 grid place-items-center rounded-full hover:bg-[#1a1a1a] disabled:opacity-25"
-                            aria-label={`Move ${loc.city} down`}
-                            disabled={isLast}
-                            onClick={() => moveSaved(i, 1)}
-                          >↓</button>
-                          <button
-                            className="lw-muted w-8 h-8 grid place-items-center rounded-full hover:bg-[#1a1a1a] text-base"
-                            aria-label={`Remove ${loc.city}`}
-                            onClick={() => removeSaved(loc)}
-                          >×</button>
+                          {editMode && (
+                            <button
+                              className="lw-muted w-8 h-8 grid place-items-center rounded-full hover:bg-[#1a1a1a] text-base"
+                              aria-label={`Remove ${loc.city}`}
+                              onClick={() => removeSaved(loc)}
+                            >×</button>
+                          )}
                         </div>
                       );
                     })
@@ -749,6 +794,17 @@
                   </div>
                   <div className="lw-muted text-[12px] leading-[1.7] mt-5">
                     Forecast and city search from Open-Meteo. Reverse geocoding from BigDataCloud.
+                  </div>
+                  <div className="text-[12px] leading-[1.7] mt-3">
+                    <a
+                      href="https://github.com/Ryanb58/lazyweather/"
+                      target="_blank"
+                      rel="noopener noreferrer"
+                      className="underline underline-offset-2"
+                    >
+                      Open source on GitHub
+                    </a>
+                    <span className="lw-muted"> · contributors welcome.</span>
                   </div>
                 </div>
               </div>
