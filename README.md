@@ -21,6 +21,10 @@ Pure black, JetBrains Mono, three-page horizontal pager: **Saved | Today | Tomor
 ```bash
 npx serve docs
 # open http://localhost:3000
+
+# or, using Python's built-in server:
+python3 -m http.server 8000 -d docs
+# open http://localhost:8000
 ```
 
 Geolocation needs `localhost` or `https://`. On `file://` it falls back to Bellevue.

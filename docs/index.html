@@ -260,6 +260,7 @@
       const [editMode, setEditMode] = useState(false);
       const [dragIdx, setDragIdx] = useState(null);
       const dragFromRef = useRef(null);
+      const wxFetchedRef = useRef(new Set());
       const scrollerRef = useRef(null);
       const searchInputRef = useRef(null);
       const todayPageRef = useRef(null);
@@ -332,10 +333,11 @@
         let cancelled = false;
         saved.forEach((loc) => {
           const key = wxKey(loc);
-          if (savedWx[key]) return;
+          if (wxFetchedRef.current.has(key)) return;
+          wxFetchedRef.current.add(key);
           fetchCurrentWeather(loc.lat, loc.lon)
             .then((wx) => { if (!cancelled) setSavedWx((m) => ({ ...m, [key]: wx })); })
-            .catch(() => {});
+            .catch(() => { wxFetchedRef.current.delete(key); });
         });
         return () => { cancelled = true; };
       }, [saved]);
@@ -357,8 +359,9 @@
       useEffect(() => {
         if (!searchOpen && !menuOpen) return;
         const onDown = (e) => {
-          if (searchOpen && !e.target.closest("[data-lw-search]")) setSearchOpen(false);
-          if (menuOpen && !e.target.closest("[data-lw-menu]")) setMenuOpen(false);
+          const target = e.target instanceof Element ? e.target : null;
+          if (searchOpen && !target?.closest("[data-lw-search]")) setSearchOpen(false);
+          if (menuOpen && !target?.closest("[data-lw-menu]")) setMenuOpen(false);
         };
         document.addEventListener("mousedown", onDown);
         document.addEventListener("touchstart", onDown);
@@ -769,13 +772,14 @@
                 onClick={() => setAboutOpen(false)}
                 role="dialog"
                 aria-modal="true"
+                aria-labelledby="about-dialog-title"
               >
                 <div
                   className="bg-[#1a1a1a] rounded-2xl p-6 max-w-sm w-full"
                   onClick={(e) => e.stopPropagation()}
                 >
                   <div className="flex items-center justify-between mb-3 -mt-2 -mr-2">
-                    <div className="lw-muted text-[11px] uppercase tracking-wider">About</div>
+                    <div id="about-dialog-title" className="lw-muted text-[11px] uppercase tracking-wider">About</div>
                     <button
                       onClick={() => setAboutOpen(false)}
                       aria-label="Close"
