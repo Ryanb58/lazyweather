@@ -33,8 +33,9 @@
     body { margin: 0; overflow: hidden; overscroll-behavior-y: none; }
     .lw { font-family: 'JetBrains Mono', ui-monospace, SFMono-Regular, Menlo, monospace; }
     .lw-muted { color: #6b6b6b; }
-    .lw-pill { background: #1a1a1a; border-radius: 999px; padding: 8px 16px; color: #cfcfcf; font-size: 15px; letter-spacing: 0.02em; }
-    .lw-iconbtn { width: 40px; height: 40px; border-radius: 999px; background: #1a1a1a; color: #cfcfcf; display: grid; place-items: center; }
+    .lw-pill { background: #1a1a1a; border-radius: 999px; padding: 10px 16px; color: #cfcfcf; font-size: 15px; letter-spacing: 0.02em; min-height: 44px; display: inline-flex; align-items: center; line-height: 1.25; }
+    .lw-iconbtn { width: 44px; height: 44px; border-radius: 999px; background: #1a1a1a; color: #cfcfcf; display: grid; place-items: center; }
+    button, a { -webkit-tap-highlight-color: transparent; }
     .scroller { scroll-snap-type: x mandatory; -webkit-overflow-scrolling: touch; scrollbar-width: none; }
     .scroller::-webkit-scrollbar { display: none; }
     .page { scroll-snap-align: start; scroll-snap-stop: always; }
@@ -44,7 +45,7 @@
   <div id="root"></div>
 
   <script type="text/babel" data-presets="react">
-    const { useCallback, useEffect, useRef, useState, Fragment } = React;
+    const { useCallback, useEffect, useLayoutEffect, useRef, useState, Fragment } = React;
 
     const FALLBACK = { lat: 47.6101, lon: -122.2015, city: "Bellevue" };
     const SLOTS = [
@@ -121,6 +122,21 @@
       return j.locality || j.city || j.principalSubdivision || j.countryName || "Here";
     }
 
+    const SAVED_KEY = "lw-saved-locations";
+    function loadSavedLocations() {
+      try {
+        const raw = localStorage.getItem(SAVED_KEY);
+        if (!raw) return [];
+        const arr = JSON.parse(raw);
+        if (!Array.isArray(arr)) return [];
+        return arr.filter((p) => p && typeof p.city === "string" && typeof p.lat === "number" && typeof p.lon === "number");
+      } catch { return []; }
+    }
+    function sameLocation(a, b) {
+      if (!a || !b) return false;
+      return a.city === b.city && Math.abs(a.lat - b.lat) < 0.01 && Math.abs(a.lon - b.lon) < 0.01;
+    }
+
     async function fetchWeather(lat, lon) {
       const url = `https://api.open-meteo.com/v1/forecast?latitude=${lat}&longitude=${lon}&hourly=temperature_2m,weathercode&daily=weathercode,temperature_2m_max,temperature_2m_min&past_days=1&forecast_days=2&timezone=auto`;
       const r = await fetch(url);
@@ -150,6 +166,17 @@
       const tomorrowCode = j.daily.weathercode[2] ?? j.daily.weathercode[1];
       return { slotsToday, slotsTomorrow, todayVsYesterdayC: tAvg - yAvg, tomorrowVsTodayC: tmAvg - tAvg, tomorrowCode };
     }
+
+    async function fetchCurrentWeather(lat, lon) {
+      const url = `https://api.open-meteo.com/v1/forecast?latitude=${lat}&longitude=${lon}&current=temperature_2m,weathercode,is_day&timezone=auto`;
+      const r = await fetch(url);
+      if (!r.ok) throw new Error(`HTTP ${r.status}`);
+      const j = await r.json();
+      const c = j.current || {};
+      return { tempC: c.temperature_2m, code: c.weathercode ?? 0, isDay: c.is_day === 1 };
+    }
+
+    const wxKey = (loc) => `${loc.lat.toFixed(4)},${loc.lon.toFixed(4)}`;
 
     function Dotgrid() {
       return (
@@ -213,7 +240,7 @@
       const [usingFallback, setUsingFallback] = useState(false);
       const [unit, setUnit] = useState("C");
       const [menuOpen, setMenuOpen] = useState(false);
-      const [page, setPage] = useState(0);
+      const [page, setPage] = useState(1);
       const [searchOpen, setSearchOpen] = useState(false);
       const [searchQuery, setSearchQuery] = useState("");
       const [searchResults, setSearchResults] = useState([]);
@@ -224,8 +251,19 @@
       const [bannerDismissed, setBannerDismissed] = useState(() => {
         try { return localStorage.getItem("lw-install-dismissed") === "1"; } catch { return false; }
       });
+      const [aboutOpen, setAboutOpen] = useState(false);
+      const [saved, setSaved] = useState(loadSavedLocations);
+      const [savedWx, setSavedWx] = useState({});
+      const [addQuery, setAddQuery] = useState("");
+      const [addResults, setAddResults] = useState([]);
+      const [addSearching, setAddSearching] = useState(false);
+      const [editMode, setEditMode] = useState(false);
+      const [dragIdx, setDragIdx] = useState(null);
+      const dragFromRef = useRef(null);
+      const wxFetchedRef = useRef(new Set());
       const scrollerRef = useRef(null);
       const searchInputRef = useRef(null);
+      const todayPageRef = useRef(null);
 
       const resolveLocation = useCallback(async (forceGeo = false) => {
         setStatus("locating"); setErr(null); setData(null); setGeoErr(null);
@@ -282,6 +320,73 @@
       useEffect(() => {
         if (searchOpen && searchInputRef.current) searchInputRef.current.focus();
       }, [searchOpen]);
+
+      useEffect(() => {
+        try { localStorage.setItem(SAVED_KEY, JSON.stringify(saved)); } catch {}
+      }, [saved]);
+
+      useEffect(() => {
+        if (saved.length === 0 && editMode) setEditMode(false);
+      }, [saved.length, editMode]);
+
+      useEffect(() => {
+        let cancelled = false;
+        saved.forEach((loc) => {
+          const key = wxKey(loc);
+          if (wxFetchedRef.current.has(key)) return;
+          wxFetchedRef.current.add(key);
+          fetchCurrentWeather(loc.lat, loc.lon)
+            .then((wx) => { if (!cancelled) setSavedWx((m) => ({ ...m, [key]: wx })); })
+            .catch(() => { wxFetchedRef.current.delete(key); });
+        });
+        return () => { cancelled = true; };
+      }, [saved]);
+
+      useEffect(() => {
+        const q = addQuery.trim();
+        if (q.length < 2) { setAddResults([]); setAddSearching(false); return; }
+        let cancelled = false;
+        setAddSearching(true);
+        const t = setTimeout(() => {
+          searchPlaces(q)
+            .then((rs) => { if (!cancelled) setAddResults(rs); })
+            .catch(() => { if (!cancelled) setAddResults([]); })
+            .finally(() => { if (!cancelled) setAddSearching(false); });
+        }, 250);
+        return () => { cancelled = true; clearTimeout(t); };
+      }, [addQuery]);
+
+      useEffect(() => {
+        if (!searchOpen && !menuOpen) return;
+        const onDown = (e) => {
+          const target = e.target instanceof Element ? e.target : null;
+          if (searchOpen && !target?.closest("[data-lw-search]")) setSearchOpen(false);
+          if (menuOpen && !target?.closest("[data-lw-menu]")) setMenuOpen(false);
+        };
+        document.addEventListener("mousedown", onDown);
+        document.addEventListener("touchstart", onDown);
+        return () => {
+          document.removeEventListener("mousedown", onDown);
+          document.removeEventListener("touchstart", onDown);
+        };
+      }, [searchOpen, menuOpen]);
+
+      useLayoutEffect(() => {
+        const scroller = scrollerRef.current;
+        const today = todayPageRef.current;
+        if (!scroller || !today) return;
+        const goToToday = () => {
+          if (!scroller.isConnected) return;
+          const w = scroller.clientWidth;
+          if (w > 0) scroller.scrollLeft = today.offsetLeft;
+        };
+        goToToday();
+        // Re-apply on next frame in case clientWidth wasn't measured yet.
+        const raf = requestAnimationFrame(() => {
+          if (scroller.scrollLeft === 0) goToToday();
+        });
+        return () => cancelAnimationFrame(raf);
+      }, []);
 
       useEffect(() => {
         const ua = navigator.userAgent || "";
@@ -342,10 +447,68 @@
         setCoords({ lat: p.latitude, lon: p.longitude });
       };
 
+      const currentLoc = coords && city ? { city, lat: coords.lat, lon: coords.lon } : null;
+      const isCurrentSaved = !!currentLoc && saved.some((s) => sameLocation(s, currentLoc));
+      const toggleSaveCurrent = () => {
+        if (!currentLoc) return;
+        setSaved((prev) => prev.some((s) => sameLocation(s, currentLoc))
+          ? prev.filter((s) => !sameLocation(s, currentLoc))
+          : [...prev, currentLoc]);
+      };
+      const removeSaved = (loc) => setSaved((prev) => prev.filter((s) => !sameLocation(s, loc)));
+      const pickSaved = (loc) => {
+        pickPlace({ name: loc.city, latitude: loc.lat, longitude: loc.lon });
+        const el = scrollerRef.current;
+        if (el) el.scrollTo({ left: el.clientWidth, behavior: "smooth" });
+      };
+      const addToSaved = (p) => {
+        const loc = { city: p.name, lat: p.latitude, lon: p.longitude };
+        setSaved((prev) => prev.some((s) => sameLocation(s, loc)) ? prev : [...prev, loc]);
+        setAddQuery("");
+        setAddResults([]);
+      };
+      const reorderSaved = (from, to) => {
+        setSaved((prev) => {
+          if (from === to || from < 0 || to < 0 || from >= prev.length || to >= prev.length) return prev;
+          const next = prev.slice();
+          const [item] = next.splice(from, 1);
+          next.splice(to, 0, item);
+          return next;
+        });
+      };
+
+      const onDragHandleDown = (i) => (e) => {
+        e.preventDefault();
+        try { e.currentTarget.setPointerCapture(e.pointerId); } catch {}
+        dragFromRef.current = i;
+        setDragIdx(i);
+      };
+      const onDragHandleMove = (e) => {
+        if (dragFromRef.current === null) return;
+        const target = document.elementFromPoint(e.clientX, e.clientY);
+        const row = target && target.closest("[data-saved-row]");
+        if (!row) return;
+        const overIdx = parseInt(row.dataset.savedRow, 10);
+        if (Number.isNaN(overIdx) || overIdx === dragFromRef.current) return;
+        reorderSaved(dragFromRef.current, overIdx);
+        dragFromRef.current = overIdx;
+        setDragIdx(overIdx);
+      };
+      const onDragHandleUp = (e) => {
+        if (dragFromRef.current === null) return;
+        try { e.currentTarget.releasePointerCapture(e.pointerId); } catch {}
+        dragFromRef.current = null;
+        setDragIdx(null);
+      };
+
       const onScroll = () => {
         const el = scrollerRef.current; if (!el) return;
         const idx = Math.round(el.scrollLeft / el.clientWidth);
-        if (idx !== page) setPage(idx);
+        if (idx !== page) {
+          setPage(idx);
+          setSearchOpen(false);
+          setMenuOpen(false);
+        }
       };
 
       const locationLabel = status === "locating" && !city ? "*locating…*" : `*${city || "—"}*`;
@@ -355,7 +518,7 @@
           <div className="max-w-md mx-auto h-full flex flex-col relative">
             <div className="flex items-start justify-between px-5 pb-2 z-10 gap-3" style={{ paddingTop: "max(1.25rem, env(safe-area-inset-top))" }}>
               <div className="flex flex-col gap-1 min-w-0">
-                <div className="relative">
+                <div className="relative" data-lw-search>
                   <button
                     className="lw-pill truncate max-w-[60vw] hover:bg-[#222] transition cursor-pointer text-left"
                     onClick={() => { setMenuOpen(false); setSearchOpen((v) => !v); }}
@@ -371,7 +534,7 @@
                         onChange={(e) => setSearchQuery(e.target.value)}
                         onKeyDown={(e) => { if (e.key === "Escape") { setSearchOpen(false); setSearchQuery(""); } }}
                         placeholder="Search a city…"
-                        className="w-full bg-transparent outline-none px-3 py-2 text-[14px] placeholder:text-[#6b6b6b]"
+                        className="w-full bg-transparent outline-none px-3 py-3 text-[16px] placeholder:text-[#6b6b6b]"
                       />
                       <div className="h-px bg-white/10 my-1" />
                       {searching && (
@@ -380,7 +543,7 @@
                       {!searching && searchResults.map((p) => (
                         <button
                           key={`${p.id}-${p.latitude}-${p.longitude}`}
-                          className="w-full text-left px-3 py-2 rounded-xl hover:bg-[#262626]"
+                          className="w-full text-left px-3 py-3 rounded-xl hover:bg-[#262626]"
                           onClick={() => pickPlace(p)}
                         >
                           <div className="text-[14px]">{p.name}</div>
@@ -391,11 +554,24 @@
                         <div className="px-3 py-2 lw-muted text-[12px]">no matches</div>
                       )}
                       {searchQuery.trim().length < 2 && !searching && (
-                        <div className="px-3 py-2 lw-muted text-[11px]">Type at least 2 characters.</div>
+                        currentLoc ? (
+                          <button
+                            className="w-full text-left px-3 py-3 rounded-xl hover:bg-[#262626] flex items-center gap-2"
+                            onClick={toggleSaveCurrent}
+                          >
+                            <span className="lw-muted w-4 text-center">{isCurrentSaved ? "✓" : "+"}</span>
+                            <span className="text-[14px]">
+                              {isCurrentSaved ? "Saved " : "Save "}
+                              <span className="lw-muted">*{currentLoc.city}*</span>
+                            </span>
+                          </button>
+                        ) : (
+                          <div className="px-3 py-2 lw-muted text-[11px]">Type at least 2 characters.</div>
+                        )
                       )}
                       <div className="h-px bg-white/10 my-1" />
                       <button
-                        className="w-full text-left px-3 py-2 rounded-xl hover:bg-[#262626] flex items-center gap-2"
+                        className="w-full text-left px-3 py-3 rounded-xl hover:bg-[#262626] flex items-center gap-2"
                         onClick={() => { setSearchOpen(false); setSearchQuery(""); setSearchResults([]); resolveLocation(true); }}
                       >
                         <span className="lw-muted w-4 text-center">⌖</span>
@@ -406,41 +582,148 @@
                 </div>
                 {usingFallback && <div className="text-[11px] lw-muted pl-2">fallback{geoErr ? ` · ${geoErr}` : ""} · tap … to retry</div>}
               </div>
-              <div className="relative">
+              <div className="relative" data-lw-menu>
                 <button className="lw-iconbtn" onClick={() => { setSearchOpen(false); setMenuOpen((v) => !v); }} aria-label="menu">
                   <span className="text-xl leading-none -mt-2">…</span>
                 </button>
                 {menuOpen && (
                   <div className="absolute right-0 mt-2 rounded-2xl bg-[#1a1a1a] p-2 w-52 text-sm z-20" onMouseLeave={() => setMenuOpen(false)}>
                     <div className="px-3 pt-1 pb-1 lw-muted text-[11px] uppercase tracking-wider">Units</div>
-                    <button className={`w-full text-left px-3 py-2 rounded-xl ${unit === "C" ? "bg-[#262626]" : ""}`} onClick={() => { setUnit("C"); setMenuOpen(false); }}>Celsius</button>
-                    <button className={`w-full text-left px-3 py-2 rounded-xl ${unit === "F" ? "bg-[#262626]" : ""}`} onClick={() => { setUnit("F"); setMenuOpen(false); }}>Fahrenheit</button>
+                    <button className={`w-full text-left px-3 py-3 rounded-xl ${unit === "C" ? "bg-[#262626]" : ""}`} onClick={() => { setUnit("C"); setMenuOpen(false); }}>Celsius</button>
+                    <button className={`w-full text-left px-3 py-3 rounded-xl ${unit === "F" ? "bg-[#262626]" : ""}`} onClick={() => { setUnit("F"); setMenuOpen(false); }}>Fahrenheit</button>
                     <div className="h-px bg-white/10 my-1" />
                     <button
-                      className="w-full text-left px-3 py-2 rounded-xl disabled:opacity-50"
+                      className="w-full text-left px-3 py-3 rounded-xl disabled:opacity-50"
                       disabled={status === "loading" || status === "locating" || !coords}
                       onClick={() => { setMenuOpen(false); refreshWeather(); }}
                     >
                       {status === "loading" ? "Refreshing…" : "Refresh"}
                     </button>
-                    <button className="w-full text-left px-3 py-2 rounded-xl" onClick={() => { setMenuOpen(false); resolveLocation(true); }}>Use my location</button>
+                    <div className="h-px bg-white/10 my-1" />
+                    <button
+                      className="w-full text-left px-3 py-3 rounded-xl hover:bg-[#262626]"
+                      onClick={() => { setMenuOpen(false); setAboutOpen(true); }}
+                    >
+                      About
+                    </button>
                   </div>
                 )}
               </div>
             </div>
 
             {showInstallBanner && (
-              <div className="px-5 py-2 flex items-center justify-between gap-3 text-[12px] border-y border-white/5">
-                <button onClick={triggerInstall} className="lw-muted text-left truncate">
+              <div className="px-5 flex items-center justify-between gap-3 text-[12px] border-y border-white/5 min-h-11">
+                <button onClick={triggerInstall} className="lw-muted text-left truncate self-stretch flex items-center">
                   <span className="text-white/90 underline underline-offset-2">Add to home screen</span>
                   <span> for the cleanest view</span>
                 </button>
-                <button onClick={dismissBanner} aria-label="Dismiss" className="lw-muted shrink-0 w-6 text-base leading-none">×</button>
+                <button onClick={dismissBanner} aria-label="Dismiss" className="lw-muted shrink-0 w-11 h-11 grid place-items-center text-base leading-none -mr-2">×</button>
               </div>
             )}
 
             <div ref={scrollerRef} onScroll={onScroll} className="scroller flex-1 min-h-0 overflow-x-auto overflow-y-hidden flex">
               <section className="page min-w-full px-5 flex flex-col">
+                <div className="flex items-end justify-between pt-2 gap-3">
+                  <div className="text-[26px] leading-[1.35]">
+                    <div>Your saved</div>
+                    <div className="lw-muted tracking-wide">PLACES</div>
+                  </div>
+                  {saved.length > 0 && (
+                    <button
+                      className="text-[13px] underline underline-offset-2 shrink-0 min-h-11 min-w-11 px-2 -mr-2 flex items-center justify-end"
+                      onClick={() => { dragFromRef.current = null; setDragIdx(null); setEditMode((v) => !v); }}
+                    >
+                      {editMode ? "Done" : "Edit"}
+                    </button>
+                  )}
+                </div>
+                <div className="relative pt-4">
+                  <input
+                    value={addQuery}
+                    onChange={(e) => setAddQuery(e.target.value)}
+                    onKeyDown={(e) => { if (e.key === "Escape") { setAddQuery(""); setAddResults([]); } }}
+                    placeholder="Search to add a place…"
+                    className="w-full bg-[#1a1a1a] rounded-2xl outline-none px-4 py-3 text-[16px] placeholder:text-[#6b6b6b]"
+                  />
+                  {(addSearching || (addQuery.trim().length >= 2 && !addSearching)) && (
+                    <div className="absolute left-0 right-0 mt-2 rounded-2xl bg-[#1a1a1a] p-2 z-10 shadow-lg">
+                      {addSearching && <div className="px-3 py-2 lw-muted text-[12px]">searching…</div>}
+                      {!addSearching && addResults.map((p) => {
+                        const exists = saved.some((s) => sameLocation(s, { city: p.name, lat: p.latitude, lon: p.longitude }));
+                        return (
+                          <button
+                            key={`${p.id}-${p.latitude}-${p.longitude}`}
+                            className="w-full text-left px-3 py-3 rounded-xl hover:bg-[#262626] disabled:opacity-40"
+                            disabled={exists}
+                            onClick={() => addToSaved(p)}
+                          >
+                            <div className="text-[14px]">{p.name}{exists ? " · added" : ""}</div>
+                            <div className="lw-muted text-[11px]">{[p.admin1, p.country].filter(Boolean).join(", ")}</div>
+                          </button>
+                        );
+                      })}
+                      {!addSearching && addQuery.trim().length >= 2 && addResults.length === 0 && (
+                        <div className="px-3 py-2 lw-muted text-[12px]">no matches</div>
+                      )}
+                    </div>
+                  )}
+                </div>
+                <div className="flex-1 min-h-0 overflow-y-auto pt-4 pb-10">
+                  {saved.length === 0 ? (
+                    <div className="lw-muted text-[13px]">No saved places yet. Search above to add one.</div>
+                  ) : (
+                    saved.map((loc, i) => {
+                      const wx = savedWx[wxKey(loc)];
+                      return (
+                        <div
+                          key={`${loc.city}-${loc.lat}-${loc.lon}`}
+                          data-saved-row={i}
+                          className="flex items-center py-1.5 gap-2"
+                          style={{ opacity: dragIdx === i ? 0.4 : 1, transition: "opacity 120ms" }}
+                        >
+                          {editMode && (
+                            <button
+                              className="lw-muted w-11 h-11 grid place-items-center cursor-grab active:cursor-grabbing select-none -ml-2"
+                              style={{ touchAction: "none" }}
+                              onPointerDown={onDragHandleDown(i)}
+                              onPointerMove={onDragHandleMove}
+                              onPointerUp={onDragHandleUp}
+                              onPointerCancel={onDragHandleUp}
+                              aria-label={`Reorder ${loc.city}`}
+                            >≡</button>
+                          )}
+                          {editMode ? (
+                            <div className="flex-1 text-[18px] truncate pr-2 min-h-11 flex items-center">*{loc.city}*</div>
+                          ) : (
+                            <button
+                              className="flex-1 text-left text-[18px] truncate hover:text-white pr-2 min-h-11 flex items-center"
+                              onClick={() => pickSaved(loc)}
+                              aria-label={`Switch to ${loc.city}`}
+                            >
+                              *{loc.city}*
+                            </button>
+                          )}
+                          <div className="text-[16px] tabular-nums lw-muted text-right min-w-[4ch]">
+                            {wx ? fmtTemp(wx.tempC, unit) : "…"}
+                          </div>
+                          <div className="text-[18px] lw-muted w-6 text-center">
+                            {wx ? codeGlyph(wx.code, !wx.isDay) : ""}
+                          </div>
+                          {editMode && (
+                            <button
+                              className="lw-muted w-11 h-11 grid place-items-center rounded-full hover:bg-[#1a1a1a] text-base -mr-2"
+                              aria-label={`Remove ${loc.city}`}
+                              onClick={() => removeSaved(loc)}
+                            >×</button>
+                          )}
+                        </div>
+                      );
+                    })
+                  )}
+                </div>
+              </section>
+
+              <section ref={todayPageRef} className="page min-w-full px-5 flex flex-col">
                 <div className="flex-1 flex items-center">
                   {status === "ready" && data ? <TodayHeadline deltaC={data.todayVsYesterdayC} /> :
                    status === "error" ? (
@@ -483,11 +766,63 @@
               </section>
             </div>
 
-            <div className="flex justify-center gap-2 pt-2" style={{ paddingBottom: "max(1.5rem, env(safe-area-inset-bottom))" }}>
-              {[0,1].map((i) => (
+            {aboutOpen && (
+              <div
+                className="fixed inset-0 z-50 bg-black/85 flex items-center justify-center p-6"
+                onClick={() => setAboutOpen(false)}
+                role="dialog"
+                aria-modal="true"
+                aria-labelledby="about-dialog-title"
+              >
+                <div
+                  className="bg-[#1a1a1a] rounded-2xl p-6 max-w-sm w-full"
+                  onClick={(e) => e.stopPropagation()}
+                >
+                  <div className="flex items-center justify-between mb-3 -mt-2 -mr-2">
+                    <div id="about-dialog-title" className="lw-muted text-[11px] uppercase tracking-wider">About</div>
+                    <button
+                      onClick={() => setAboutOpen(false)}
+                      aria-label="Close"
+                      className="lw-muted w-11 h-11 grid place-items-center text-xl leading-none"
+                    >×</button>
+                  </div>
+                  <div className="text-[14px] leading-[1.7]">
+                    <div>Crafted with <span className="text-white">{'<3'}</span> by</div>
+                    <a
+                      href="https://taylorbrazelton.com"
+                      target="_blank"
+                      rel="noopener noreferrer"
+                      className="underline underline-offset-2"
+                    >
+                      *Taylor Brazelton*
+                    </a>
+                  </div>
+                  <div className="lw-muted text-[12px] leading-[1.7] mt-5">
+                    Forecast and city search from Open-Meteo. Reverse geocoding from BigDataCloud.
+                  </div>
+                  <div className="text-[12px] leading-[1.7] mt-3">
+                    <a
+                      href="https://github.com/Ryanb58/lazyweather/"
+                      target="_blank"
+                      rel="noopener noreferrer"
+                      className="underline underline-offset-2"
+                    >
+                      Open source on GitHub
+                    </a>
+                    <span className="lw-muted"> · contributors welcome.</span>
+                  </div>
+                </div>
+              </div>
+            )}
+
+            <div className="flex justify-center" style={{ paddingBottom: "max(1.5rem, env(safe-area-inset-bottom))" }}>
+              {[0,1,2].map((i) => (
                 <button key={i} aria-label={`page ${i+1}`}
                   onClick={() => { const el = scrollerRef.current; if (el) el.scrollTo({ left: i * el.clientWidth, behavior: "smooth" }); }}
-                  className="w-1.5 h-1.5 rounded-full" style={{ background: page === i ? "#e5e5e5" : "#3a3a3a" }} />
+                  className="h-11 px-1 grid place-items-center"
+                >
+                  <span className="block w-1.5 h-1.5 rounded-full" style={{ background: page === i ? "#e5e5e5" : "#3a3a3a" }} />
+                </button>
               ))}
             </div>
           </div>
